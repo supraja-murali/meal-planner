@@ -11,17 +11,17 @@ type Target = {
 
 const targets: Target[] = [
   {
-    icon: Beef,
+    icon: Bean,
     label: "Protein",
     value: "90–100 g",
-    hint: "per day",
+    hint: "per person / day",
     accentClass: "bg-primary/10 text-primary",
   },
   {
     icon: Wheat,
     label: "Fibre",
     value: "≥ 30 g",
-    hint: "per day",
+    hint: "per person / day",
     accentClass: "bg-accent text-accent-foreground",
   },
 ]
