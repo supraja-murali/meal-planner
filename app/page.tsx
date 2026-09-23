@@ -12,6 +12,7 @@ import { CookingStructureCard } from "@/components/cooking-structure-card"
 import { ProteinRuleCard } from "@/components/protein-rule-card"
 import { PlanMealButton } from "@/components/plan-meal-button"
 import { supabase } from "@/lib/supabase"
+import { RecipeForm } from "@/components/recipe-form"
 
 type Preferences = Record<PreferenceKey, boolean>
 
@@ -41,6 +42,8 @@ export default function HomePage() {
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [authError, setAuthError] = useState("")
+  const [currentView, setCurrentView] = useState<"home" | "add-recipe">("home")
+  const [householdId, setHouseholdId] = useState<string | null>(null)
 
   useEffect(() => {
     loadApp()
@@ -78,6 +81,7 @@ export default function HomePage() {
     }
 
     const householdId = membership.household_id
+    setHouseholdId(householdId)
 
     const { data: preferenceData, error: preferenceError } =
       await supabase
@@ -297,6 +301,20 @@ export default function HomePage() {
   }
 
   if (!user) {
+    if (currentView === "add-recipe" && householdId) {
+      return (
+        <main className="mx-auto min-h-dvh w-full max-w-md px-4 pb-10">
+          <div className="pt-4">
+            <RecipeForm
+              userId={user.id}
+              householdId={householdId}
+              onCancel={() => setCurrentView("home")}
+              onSaved={() => setCurrentView("home")}
+            />
+          </div>
+        </main>
+      )
+    }
     return (
       <main className="mx-auto flex min-h-dvh w-full max-w-md items-center px-4">
         <div className="w-full space-y-5">
@@ -358,6 +376,24 @@ export default function HomePage() {
     <main className="mx-auto min-h-dvh w-full max-w-md px-4 pb-10">
       <div className="flex flex-col gap-5 pt-4">
         <AppHeader />
+
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => setCurrentView("home")}
+            className="flex-1 rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground"
+          >
+            Home
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setCurrentView("add-recipe")}
+            className="flex-1 rounded-lg border border-border bg-background px-4 py-2.5 text-sm font-semibold"
+          >
+            My Recipes
+          </button>
+        </div>
 
         <div className="flex items-center justify-between">
           <p className="truncate text-xs text-muted-foreground">
