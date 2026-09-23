@@ -17,9 +17,8 @@ export function ProteinRuleCard() {
               Protein balancing rule
             </h2>
             <p className="text-sm leading-relaxed text-muted-foreground">
-              The upcoming meal planner will avoid stacking major protein sources on the same day — for example, it
-              won&apos;t pair a high-legume dish (like a heavy toor dal) with a tofu- or paneer-based dish together. This
-              keeps each day balanced and easier to digest.
+              The meal planner will avoid combining a major legume-based dish with a tofu/soy-based dish on the same
+              day.
             </p>
           </div>
         </CardContent>

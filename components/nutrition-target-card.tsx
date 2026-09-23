@@ -1,5 +1,5 @@
 import { Card, CardContent } from "@/components/ui/card"
-import { Beef, Wheat } from "lucide-react"
+import { Beef, Wheat, Users } from "lucide-react"
 
 type Target = {
   icon: typeof Beef
@@ -14,14 +14,14 @@ const targets: Target[] = [
     icon: Beef,
     label: "Protein",
     value: "90–100 g",
-    hint: "per day",
+    hint: "per person / day",
     accentClass: "bg-primary/10 text-primary",
   },
   {
     icon: Wheat,
     label: "Fibre",
     value: "≥ 30 g",
-    hint: "per day",
+    hint: "per person / day",
     accentClass: "bg-accent text-accent-foreground",
   },
 ]
@@ -29,9 +29,14 @@ const targets: Target[] = [
 export function NutritionTargetCard() {
   return (
     <section aria-labelledby="nutrition-heading">
-      <h2 id="nutrition-heading" className="mb-3 px-1 text-sm font-semibold text-muted-foreground">
-        Daily nutrition target
-      </h2>
+      <div className="mb-3 flex items-center justify-between px-1">
+        <h2 id="nutrition-heading" className="text-sm font-semibold text-muted-foreground">
+          Daily nutrition target
+        </h2>
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-secondary px-2.5 py-1 text-xs font-medium text-secondary-foreground">
+          <Users className="size-3.5" aria-hidden="true" />2 people
+        </span>
+      </div>
       <div className="grid grid-cols-2 gap-3">
         {targets.map((target) => {
           const Icon = target.icon
