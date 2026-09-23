@@ -1,8 +1,8 @@
 import { Card, CardContent } from "@/components/ui/card"
-import { Beef, Wheat } from "lucide-react"
+import { Bean, Wheat } from "lucide-react"
 
 type Target = {
-  icon: typeof Beef
+  icon: typeof Bean
   label: string
   value: string
   hint: string
