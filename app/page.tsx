@@ -43,9 +43,7 @@ export default function HomePage() {
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [authError, setAuthError] = useState("")
-  const [currentView, setCurrentView] = useState<
-    "home" | "recipes" | "add-recipe"
-  >("home")
+  const [currentView, setCurrentView] = useState<"home" | "recipes" | "add-recipe">("home")
   const [householdId, setHouseholdId] = useState<string | null>(null)
 
   useEffect(() => {
@@ -303,8 +301,11 @@ export default function HomePage() {
     )
   }
 
-  if (!user) {
-    if (currentView === "recipes" && householdId) {
+    // ─────────────────────────────────────────────
+    // Recipe views
+    // ─────────────────────────────────────────────
+
+    if (user && currentView === "recipes" && householdId) {
       return (
         <main className="mx-auto min-h-dvh w-full max-w-md px-4 pb-10">
           <div className="pt-4">
@@ -330,7 +331,11 @@ export default function HomePage() {
       )
     }
 
-    if (currentView === "add-recipe" && householdId) {
+    // ─────────────────────────────────────────────
+    // Add recipe view
+    // ─────────────────────────────────────────────
+
+    if (user && currentView === "add-recipe" && householdId) {
       return (
         <main className="mx-auto min-h-dvh w-full max-w-md px-4 pb-10">
           <div className="pt-4">
@@ -344,62 +349,69 @@ export default function HomePage() {
         </main>
       )
     }
-    return (
-      <main className="mx-auto flex min-h-dvh w-full max-w-md items-center px-4">
-        <div className="w-full space-y-5">
-          <div className="space-y-2 text-center">
-            <h1 className="text-3xl font-bold">
-              Namma Saapadu
-            </h1>
-            <p className="text-sm text-muted-foreground">
-              Your household meal planner
-            </p>
-          </div>
 
-          <div className="space-y-3 rounded-2xl border border-border p-5">
-            <h2 className="text-lg font-semibold">
-              Sign in
-            </h2>
+    // ─────────────────────────────────────────────
+    // Login view
+    // ─────────────────────────────────────────────
 
-            <input
-              type="email"
-              placeholder="Email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none"
-            />
+    if (!user) {
+      return (
+        <main className="mx-auto flex min-h-dvh w-full max-w-md items-center px-4">
+          <div className="w-full space-y-5">
+            <div className="space-y-2 text-center">
+              <h1 className="text-3xl font-bold">
+                Meal Planner
+              </h1>
 
-            <input
-              type="password"
-              placeholder="Password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none"
-            />
-
-            {authError && (
-              <p className="text-sm text-destructive">
-                {authError}
+              <p className="text-sm text-muted-foreground">
+                Your household meal planner
               </p>
-            )}
+            </div>
 
-            <button
-              type="button"
-              onClick={signIn}
-              disabled={
-                authLoading ||
-                !email.trim() ||
-                !password
-              }
-              className="w-full rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground disabled:opacity-50"
-            >
-              {authLoading ? "Signing in…" : "Sign in"}
-            </button>
+            <div className="space-y-3 rounded-2xl border border-border p-5">
+              <h2 className="text-lg font-semibold">
+                Sign in
+              </h2>
+
+              <input
+                type="email"
+                placeholder="Email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none"
+              />
+
+              <input
+                type="password"
+                placeholder="Password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none"
+              />
+
+              {authError && (
+                <p className="text-sm text-destructive">
+                  {authError}
+                </p>
+              )}
+
+              <button
+                type="button"
+                onClick={signIn}
+                disabled={
+                  authLoading ||
+                  !email.trim() ||
+                  !password
+                }
+                className="w-full rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground disabled:opacity-50"
+              >
+                {authLoading ? "Signing in…" : "Sign in"}
+              </button>
+            </div>
           </div>
-        </div>
-      </main>
-    )
-  }
+        </main>
+      )
+    }
 
   return (
     <main className="mx-auto min-h-dvh w-full max-w-md px-4 pb-10">
