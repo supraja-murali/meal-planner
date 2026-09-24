@@ -13,6 +13,7 @@ import { ProteinRuleCard } from "@/components/protein-rule-card"
 import { PlanMealButton } from "@/components/plan-meal-button"
 import { supabase } from "@/lib/supabase"
 import { RecipeForm } from "@/components/recipe-form"
+import { RecipeList } from "@/components/recipe-list"
 
 type Preferences = Record<PreferenceKey, boolean>
 
@@ -42,7 +43,9 @@ export default function HomePage() {
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [authError, setAuthError] = useState("")
-  const [currentView, setCurrentView] = useState<"home" | "add-recipe">("home")
+  const [currentView, setCurrentView] = useState<
+    "home" | "recipes" | "add-recipe"
+  >("home")
   const [householdId, setHouseholdId] = useState<string | null>(null)
 
   useEffect(() => {
@@ -301,6 +304,32 @@ export default function HomePage() {
   }
 
   if (!user) {
+    if (currentView === "recipes" && householdId) {
+      return (
+        <main className="mx-auto min-h-dvh w-full max-w-md px-4 pb-10">
+          <div className="pt-4">
+            <div className="mb-4">
+              <button
+                type="button"
+                onClick={() => setCurrentView("home")}
+                className="text-sm font-medium text-muted-foreground"
+              >
+                ← Home
+              </button>
+            </div>
+
+            <RecipeList
+              householdId={householdId}
+              onAddRecipe={() => setCurrentView("add-recipe")}
+              onCookRecipe={(recipeId) => {
+                console.log("Cook recipe:", recipeId)
+              }}
+            />
+          </div>
+        </main>
+      )
+    }
+
     if (currentView === "add-recipe" && householdId) {
       return (
         <main className="mx-auto min-h-dvh w-full max-w-md px-4 pb-10">
@@ -308,8 +337,8 @@ export default function HomePage() {
             <RecipeForm
               userId={user.id}
               householdId={householdId}
-              onCancel={() => setCurrentView("home")}
-              onSaved={() => setCurrentView("home")}
+              onCancel={() => setCurrentView("recipes")}
+              onSaved={() => setCurrentView("recipes")}
             />
           </div>
         </main>
@@ -381,15 +410,23 @@ export default function HomePage() {
           <button
             type="button"
             onClick={() => setCurrentView("home")}
-            className="flex-1 rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground"
+            className={`flex-1 rounded-lg px-4 py-2.5 text-sm font-semibold ${
+              currentView === "home"
+                ? "bg-primary text-primary-foreground"
+                : "border border-border bg-background"
+            }`}
           >
             Home
           </button>
 
           <button
             type="button"
-            onClick={() => setCurrentView("add-recipe")}
-            className="flex-1 rounded-lg border border-border bg-background px-4 py-2.5 text-sm font-semibold"
+            onClick={() => setCurrentView("recipes")}
+            className={`flex-1 rounded-lg px-4 py-2.5 text-sm font-semibold ${
+              currentView === "recipes"
+                ? "bg-primary text-primary-foreground"
+                : "border border-border bg-background"
+            }`}
           >
             My Recipes
           </button>
