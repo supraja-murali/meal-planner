@@ -25,6 +25,7 @@ type Recipe = {
   type:
     | "gravy"
     | "poriyal"
+    | "dry_rice"
     | "other"
   servings: number
   favourite: boolean
@@ -63,6 +64,7 @@ export function RecipeList({
     | "all"
     | "gravy"
     | "poriyal"
+    | "dry_rice"
     | "other"
     | "favourite"
   >("all")
@@ -301,6 +303,7 @@ export function RecipeList({
             "poriyal",
             "Poriyal",
           ],
+          ["dry_rice", "Dry Rice"],
           ["other", "Other"],
           [
             "favourite",

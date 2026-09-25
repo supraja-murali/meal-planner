@@ -28,7 +28,7 @@ type AIIngredient = {
 
 type AIRecipe = {
   recipe_name: string
-  type: "gravy" | "poriyal" | "other"
+  type: "gravy" | "poriyal" | "dry_rice" | "other"
   servings: number
   description: string
   ingredients: AIIngredient[]

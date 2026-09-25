@@ -70,7 +70,7 @@ export function RecipeForm({
 }: RecipeFormProps) {
   const [name, setName] = useState("")
   const [type, setType] =
-    useState<"gravy" | "poriyal" | "other">("gravy")
+    useState<"gravy" | "poriyal" | "dry_rice" | "other">("gravy")
   const [servings, setServings] = useState("2")
   const [notes, setNotes] = useState("")
 
@@ -552,6 +552,7 @@ export function RecipeForm({
                     event.target.value as
                       | "gravy"
                       | "poriyal"
+                      | "dry_rice"
                       | "other"
                   )
                 }
@@ -563,6 +564,10 @@ export function RecipeForm({
 
                 <option value="poriyal">
                   Poriyal
+                </option>
+
+                <option value="dry_rice">
+                  Dry Rice
                 </option>
 
                 <option value="other">

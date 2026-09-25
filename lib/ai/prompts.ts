@@ -11,7 +11,7 @@ export const RECIPE_SCHEMA = {
     },
     type: {
       type: "string",
-      enum: ["gravy", "poriyal", "other"],
+      enum: ["gravy", "poriyal", "dry_rice", "other"],
     },
     servings: {
       type: "integer",
@@ -159,11 +159,13 @@ RECIPE TYPE
 Classify the dish as:
 - "gravy" for curries, kuzhambu, sambar, dal-based gravies, kurma, etc.
 - "poriyal" for vegetable stir-fries, dry vegetable preparations, thoran, etc.
+- "dry_rice" for rice-based main dishes such as tomato rice, lemon rice,
+  coconut rice, tamarind rice, puliyodarai, fried rice, vegetable rice,
+  biryani-style vegetarian rice, and similar one-pot or mixed-rice dishes.
 - "other" when it does not clearly belong to either category.
 
-Dry-rice dishes such as tomato rice, lemon rice, coconut rice, tamarind rice,
-puliyodarai, fried rice, vegetable rice, and similar rice-based main dishes
-should normally be classified as "other".
+Dry-rice dishes must always use type "dry_rice".
+Do not classify a dry-rice dish as "other".
 
 INGREDIENTS
 
