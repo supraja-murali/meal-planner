@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from "react"
 import {
-  CalendarDays,
   ChefHat,
   Home,
   Settings,
@@ -11,45 +10,23 @@ import {
 
 import { AppHeader } from "@/components/app-header"
 import { PantrySection } from "@/components/pantry-section"
-
-import {
-  DietaryPreferences,
-  type PreferenceKey,
-  type DateRestriction,
-} from "@/components/dietary-preferences"
-
 import { RecipeForm } from "@/components/recipe-form"
 import { RecipeList } from "@/components/recipe-list"
 import { CookingSession } from "@/components/cooking-session"
-
 import { AISettings } from "@/components/ai-settings"
 import { AIRecipeAssistant } from "@/components/ai-recipe-assistant"
-import { MealPlanner } from "@/components/meal-planner"
-
 import {
-  WeeklyMealPlan,
+  MealPlanner,
+  type DateRestriction,
+  type PantryItem,
   type WeeklyMealDay,
   type WeeklyRecipe,
-} from "@/components/weekly-meal-plan"
+} from "@/components/meal-planner"
 
 import { supabase } from "@/lib/supabase"
 
 const HOUSEHOLD_ID =
   "25236a71-99cc-4ced-8500-c2125123d4db"
-
-type Preferences = Record<
-  PreferenceKey,
-  boolean
->
-
-type PantryItem = {
-  id: string
-  name: string
-  quantity: number
-  unit: string
-  boughtAt: string
-  availableForPlanning: boolean
-}
 
 type View =
   | "week"
@@ -57,42 +34,51 @@ type View =
   | "recipes"
   | "add-recipe"
   | "ai-recipe"
-  | "planner"
   | "cook"
 
-const defaultPreferences: Preferences = {
-  onion: true,
-  garlic: true,
+function toDateString(date: Date) {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, "0")
+  const day = String(date.getDate()).padStart(2, "0")
+  return `${year}-${month}-${day}`
+}
+
+function parseLocalDate(dateString: string) {
+  const [year, month, day] = dateString.split("-").map(Number)
+  return new Date(year, month - 1, day)
+}
+
+function addDays(dateString: string, amount: number) {
+  const date = parseLocalDate(dateString)
+  date.setDate(date.getDate() + amount)
+  return toDateString(date)
 }
 
 function getMonday(date = new Date()) {
   const value = new Date(date)
-  const day = value.getDay()
-
-  const diff =
-    day === 0 ? -6 : 1 - day
-
-  value.setDate(
-    value.getDate() + diff,
-  )
-
   value.setHours(0, 0, 0, 0)
-
+  const day = value.getDay()
+  const diff = day === 0 ? -6 : 1 - day
+  value.setDate(value.getDate() + diff)
   return value
 }
 
-function toDateString(date: Date) {
-  return date
-    .toISOString()
-    .slice(0, 10)
+function normalizeWeekStart(dateString: string) {
+  const date = parseLocalDate(dateString)
+  const day = date.getDay()
+  const diff = day === 0 ? -6 : 1 - day
+  date.setDate(date.getDate() + diff)
+  return toDateString(date)
+}
+
+function getWeekDates(weekStart: string) {
+  const monday = normalizeWeekStart(weekStart)
+  return Array.from({ length: 7 }, (_, index) =>
+    addDays(monday, index),
+  )
 }
 
 export default function HomePage() {
-  const [preferences, setPreferences] =
-    useState<Preferences>(
-      defaultPreferences,
-    )
-
   const [dateRestrictions, setDateRestrictions] =
     useState<DateRestriction[]>([])
 
@@ -123,28 +109,18 @@ export default function HomePage() {
   const [weekLoading, setWeekLoading] =
     useState(false)
 
-  const [weekStart] = useState(() =>
-    toDateString(getMonday()),
+  const [generating, setGenerating] =
+    useState(false)
+
+  const [weekStart, setWeekStart] =
+    useState(() =>
+      toDateString(getMonday()),
+    )
+
+  const weekDates = useMemo(
+    () => getWeekDates(weekStart),
+    [weekStart],
   )
-
-  const weekDates = useMemo(() => {
-    const monday = new Date(
-      `${weekStart}T00:00:00`,
-    )
-
-    return Array.from(
-      { length: 7 },
-      (_, index) => {
-        const date = new Date(monday)
-
-        date.setDate(
-          monday.getDate() + index,
-        )
-
-        return toDateString(date)
-      },
-    )
-  }, [weekStart])
 
   useEffect(() => {
     void loadApp()
@@ -152,58 +128,26 @@ export default function HomePage() {
 
   useEffect(() => {
     if (!loading) {
+      void loadDateRestrictions()
       void loadWeeklyPlan()
     }
-  }, [loading, weekStart])
+  }, [weekStart, loading])
 
   async function loadApp() {
     setLoading(true)
 
     await Promise.all([
-      loadPreferences(),
       loadDateRestrictions(),
       loadPantry(),
+      loadWeeklyPlan(),
     ])
 
     setLoading(false)
   }
 
-  async function loadPreferences() {
-    const {
-      data,
-      error,
-    } = await supabase
-      .from("household_preferences")
-      .select(
-        "onion_allowed, garlic_allowed",
-      )
-      .eq(
-        "household_id",
-        HOUSEHOLD_ID,
-      )
-      .maybeSingle()
-
-    if (error) {
-      console.error(
-        "Could not load dietary preferences:",
-        error,
-      )
-      return
-    }
-
-    if (data) {
-      setPreferences({
-        onion: Boolean(
-          data.onion_allowed,
-        ),
-        garlic: Boolean(
-          data.garlic_allowed,
-        ),
-      })
-    }
-  }
-
   async function loadDateRestrictions() {
+    const dates = getWeekDates(weekStart)
+
     const {
       data,
       error,
@@ -212,7 +156,7 @@ export default function HomePage() {
         "dietary_date_restrictions",
       )
       .select(
-        "restriction_date, no_onion, no_garlic",
+        "restriction_date, no_onion, no_garlic, additional_restrictions",
       )
       .eq(
         "household_id",
@@ -220,15 +164,18 @@ export default function HomePage() {
       )
       .gte(
         "restriction_date",
-        weekDates[0],
+        dates[0],
       )
       .lte(
         "restriction_date",
-        weekDates[6],
+        dates[6],
       )
-      .order("restriction_date", {
-        ascending: true,
-      })
+      .order(
+        "restriction_date",
+        {
+          ascending: true,
+        },
+      )
 
     if (error) {
       console.error(
@@ -239,15 +186,20 @@ export default function HomePage() {
     }
 
     setDateRestrictions(
-      (data ?? []).map((item) => ({
-        date: item.restriction_date,
-        noOnion: Boolean(
-          item.no_onion,
-        ),
-        noGarlic: Boolean(
-          item.no_garlic,
-        ),
-      })),
+      (data ?? []).map(
+        (item) => ({
+          date:
+            item.restriction_date,
+          noOnion: Boolean(
+            item.no_onion,
+          ),
+          noGarlic: Boolean(
+            item.no_garlic,
+          ),
+          additionalRestrictions:
+            item.additional_restrictions ?? "",
+        }),
+      ),
     )
   }
 
@@ -271,9 +223,12 @@ export default function HomePage() {
         "household_id",
         HOUSEHOLD_ID,
       )
-      .order("created_at", {
-        ascending: true,
-      })
+      .order(
+        "created_at",
+        {
+          ascending: true,
+        },
+      )
 
     if (error) {
       console.error(
@@ -297,7 +252,9 @@ export default function HomePage() {
             item.unit ?? "pcs",
           boughtAt:
             item.bought_at ??
-            toDateString(new Date()),
+            toDateString(
+              new Date(),
+            ),
           availableForPlanning:
             Boolean(
               item.available_for_planning,
@@ -327,9 +284,12 @@ export default function HomePage() {
           "week_start",
           weekStart,
         )
-        .order("created_at", {
-          ascending: false,
-        })
+        .order(
+          "created_at",
+          {
+            ascending: false,
+          },
+        )
         .limit(1)
         .maybeSingle()
 
@@ -374,9 +334,12 @@ export default function HomePage() {
           "meal_plan_id",
           plan.id,
         )
-        .order("day_date", {
-          ascending: true,
-        })
+        .order(
+          "day_date",
+          {
+            ascending: true,
+          },
+        )
 
       if (dayError) {
         console.error(
@@ -386,17 +349,49 @@ export default function HomePage() {
         return
       }
 
+      // A meal plan is valid only when it contains exactly the
+      // current Monday-to-Sunday dates. Never display a stale or
+      // incorrectly dated plan in another week's view.
+      const expectedDates = getWeekDates(weekStart)
+      const loadedDates = (dayData ?? [])
+        .map((day: any) => day.day_date)
+        .sort()
+      const expectedSorted = [...expectedDates].sort()
+      const isExactWeek =
+        loadedDates.length === 7 &&
+        loadedDates.every(
+          (date: string, index: number) =>
+            date === expectedSorted[index],
+        )
+
+      if (!isExactWeek) {
+        console.warn(
+          "Ignoring an incomplete or incorrectly dated meal plan.",
+          { expectedDates, loadedDates },
+        )
+        setWeeklyDays([])
+        setWeeklyRecipes([])
+        return
+      }
+
       const recipeIds =
         new Set<string>()
 
-      for (const day of dayData ?? []) {
-        if (day.gravy_recipe_id) {
+      for (
+        const day of
+          dayData ?? []
+      ) {
+        if (
+          day.gravy_recipe_id
+        ) {
           recipeIds.add(
             day.gravy_recipe_id,
           )
         }
 
-        if (day.poriyal_recipe_id) {
+        if (
+          day.poriyal_recipe_id
+        ) {
           recipeIds.add(
             day.poriyal_recipe_id,
           )
@@ -430,7 +425,9 @@ export default function HomePage() {
             )
             .in(
               "id",
-              Array.from(recipeIds),
+              Array.from(
+                recipeIds,
+              ),
             )
 
         if (result.error) {
@@ -453,25 +450,23 @@ export default function HomePage() {
           }),
         )
 
-      const recipeMap = new Map(
-        recipes.map((recipe) => [
-          recipe.id,
-          recipe,
-        ]),
-      )
+      setWeeklyRecipes(recipes)
 
       const days: WeeklyMealDay[] =
         (dayData ?? []).map(
           (day: any) => ({
             id: day.id,
+
             dayDate:
               day.day_date,
 
             gravyRecipeId:
-              day.gravy_recipe_id,
+              day.gravy_recipe_id ??
+              null,
 
             poriyalRecipeId:
-              day.poriyal_recipe_id,
+              day.poriyal_recipe_id ??
+              null,
 
             breakfastNote:
               day.breakfast_note ??
@@ -482,7 +477,8 @@ export default function HomePage() {
               null,
 
             reason:
-              day.reason ?? null,
+              day.reason ??
+              null,
 
             estimatedProteinG:
               day.estimated_protein_g ==
@@ -521,63 +517,10 @@ export default function HomePage() {
           }),
         )
 
-      setWeeklyRecipes(recipes)
       setWeeklyDays(days)
     } finally {
       setWeekLoading(false)
     }
-  }
-
-  async function togglePreference(
-    key: PreferenceKey,
-    value: boolean,
-  ) {
-    const previous =
-      preferences[key]
-
-    setPreferences((current) => ({
-      ...current,
-      [key]: value,
-    }))
-
-    const columnMap: Record<
-      PreferenceKey,
-      string
-    > = {
-      onion: "onion_allowed",
-      garlic: "garlic_allowed",
-    }
-
-    setSaving(true)
-
-    const { error } =
-      await supabase
-        .from(
-          "household_preferences",
-        )
-        .update({
-          [columnMap[key]]: value,
-          updated_at:
-            new Date().toISOString(),
-        })
-        .eq(
-          "household_id",
-          HOUSEHOLD_ID,
-        )
-
-    if (error) {
-      console.error(
-        "Could not save dietary preference:",
-        error,
-      )
-
-      setPreferences((current) => ({
-        ...current,
-        [key]: previous,
-      }))
-    }
-
-    setSaving(false)
   }
 
   async function toggleDateRestriction(
@@ -595,30 +538,37 @@ export default function HomePage() {
         date,
         noOnion: false,
         noGarlic: false,
+        additionalRestrictions: "",
       }
 
-    const next: DateRestriction = {
-      ...current,
-      [key]: value,
-    }
+    const next: DateRestriction =
+      {
+        ...current,
+        [key]: value,
+      }
 
     setDateRestrictions(
       (items) => {
-        const exists = items.some(
-          (item) =>
-            item.date === date,
-        )
+        const exists =
+          items.some(
+            (item) =>
+              item.date === date,
+          )
 
         if (exists) {
           return items.map(
             (item) =>
-              item.date === date
+              item.date ===
+              date
                 ? next
                 : item,
           )
         }
 
-        return [...items, next]
+        return [
+          ...items,
+          next,
+        ]
       },
     )
 
@@ -626,7 +576,8 @@ export default function HomePage() {
 
     if (
       !next.noOnion &&
-      !next.noGarlic
+      !next.noGarlic &&
+      !next.additionalRestrictions.trim()
     ) {
       const { error } =
         await supabase
@@ -665,6 +616,8 @@ export default function HomePage() {
                 next.noOnion,
               no_garlic:
                 next.noGarlic,
+              additional_restrictions:
+                next.additionalRestrictions ?? "",
               updated_at:
                 new Date().toISOString(),
             },
@@ -685,6 +638,65 @@ export default function HomePage() {
     setSaving(false)
   }
 
+  async function changeAdditionalRestriction(
+    date: string,
+    value: string,
+  ) {
+    const current =
+      dateRestrictions.find((item) => item.date === date) ?? {
+        date,
+        noOnion: false,
+        noGarlic: false,
+        additionalRestrictions: "",
+      }
+
+    const next: DateRestriction = {
+      ...current,
+      additionalRestrictions: value,
+    }
+
+    setDateRestrictions((items) => {
+      const exists = items.some((item) => item.date === date)
+      return exists
+        ? items.map((item) => (item.date === date ? next : item))
+        : [...items, next]
+    })
+
+    setSaving(true)
+
+    if (!next.noOnion && !next.noGarlic && !value.trim()) {
+      const { error } = await supabase
+        .from("dietary_date_restrictions")
+        .delete()
+        .eq("household_id", HOUSEHOLD_ID)
+        .eq("restriction_date", date)
+
+      if (error) {
+        console.error("Could not remove date restriction:", error)
+      }
+    } else {
+      const { error } = await supabase
+        .from("dietary_date_restrictions")
+        .upsert(
+          {
+            household_id: HOUSEHOLD_ID,
+            restriction_date: date,
+            no_onion: next.noOnion,
+            no_garlic: next.noGarlic,
+            additional_restrictions: value.trim(),
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: "household_id,restriction_date" },
+        )
+
+      if (error) {
+        console.error("Could not save date restriction:", error)
+      }
+    }
+
+    setSaving(false)
+  }
+
   async function addIngredient(
     name: string,
     quantity: number,
@@ -695,14 +707,18 @@ export default function HomePage() {
     const trimmed =
       name.trim()
 
-    if (!trimmed) return
+    if (!trimmed) {
+      return
+    }
 
     const {
       data: ingredient,
       error: ingredientError,
     } = await supabase
       .from("ingredients")
-      .select("id, name")
+      .select(
+        "id, name",
+      )
       .ilike(
         "name",
         trimmed,
@@ -724,13 +740,14 @@ export default function HomePage() {
       return
     }
 
-    if (
+    const duplicate =
       pantry.some(
         (item) =>
           item.name.toLowerCase() ===
           ingredient.name.toLowerCase(),
       )
-    ) {
+
+    if (duplicate) {
       return
     }
 
@@ -774,27 +791,32 @@ export default function HomePage() {
       return
     }
 
-    setPantry((current) => [
-      ...current,
-      {
-        id: data.id,
-        name:
-          (data as any)
-            .ingredients?.name ??
-          ingredient.name,
-        quantity: Number(
-          data.quantity,
-        ),
-        unit: data.unit,
-        boughtAt:
-          data.bought_at ??
-          boughtAt,
-        availableForPlanning:
-          Boolean(
-            data.available_for_planning,
-          ),
-      },
-    ])
+    setPantry(
+      (current) => [
+        ...current,
+        {
+          id: data.id,
+          name:
+            (data as any)
+              .ingredients
+              ?.name ??
+            ingredient.name,
+          quantity:
+            Number(
+              data.quantity,
+            ),
+          unit:
+            data.unit,
+          boughtAt:
+            data.bought_at ??
+            boughtAt,
+          availableForPlanning:
+            Boolean(
+              data.available_for_planning,
+            ),
+        },
+      ],
+    )
   }
 
   async function removeIngredient(
@@ -802,9 +824,14 @@ export default function HomePage() {
   ) {
     const { error } =
       await supabase
-        .from("pantry_items")
+        .from(
+          "pantry_items",
+        )
         .delete()
-        .eq("id", id)
+        .eq(
+          "id",
+          id,
+        )
         .eq(
           "household_id",
           HOUSEHOLD_ID,
@@ -818,11 +845,12 @@ export default function HomePage() {
       return
     }
 
-    setPantry((current) =>
-      current.filter(
-        (item) =>
-          item.id !== id,
-      ),
+    setPantry(
+      (current) =>
+        current.filter(
+          (item) =>
+            item.id !== id,
+        ),
     )
   }
 
@@ -834,15 +862,21 @@ export default function HomePage() {
   ) {
     const { error } =
       await supabase
-        .from("pantry_items")
+        .from(
+          "pantry_items",
+        )
         .update({
           quantity,
           unit,
-          bought_at: boughtAt,
+          bought_at:
+            boughtAt,
           updated_at:
             new Date().toISOString(),
         })
-        .eq("id", id)
+        .eq(
+          "id",
+          id,
+        )
         .eq(
           "household_id",
           HOUSEHOLD_ID,
@@ -856,17 +890,19 @@ export default function HomePage() {
       return
     }
 
-    setPantry((current) =>
-      current.map((item) =>
-        item.id === id
-          ? {
-              ...item,
-              quantity,
-              unit,
-              boughtAt,
-            }
-          : item,
-      ),
+    setPantry(
+      (current) =>
+        current.map(
+          (item) =>
+            item.id === id
+              ? {
+                  ...item,
+                  quantity,
+                  unit,
+                  boughtAt,
+                }
+              : item,
+        ),
     )
   }
 
@@ -876,14 +912,19 @@ export default function HomePage() {
   ) {
     const { error } =
       await supabase
-        .from("pantry_items")
+        .from(
+          "pantry_items",
+        )
         .update({
           available_for_planning:
             available,
           updated_at:
             new Date().toISOString(),
         })
-        .eq("id", id)
+        .eq(
+          "id",
+          id,
+        )
         .eq(
           "household_id",
           HOUSEHOLD_ID,
@@ -897,16 +938,18 @@ export default function HomePage() {
       return
     }
 
-    setPantry((current) =>
-      current.map((item) =>
-        item.id === id
-          ? {
-              ...item,
-              availableForPlanning:
-                available,
-            }
-          : item,
-      ),
+    setPantry(
+      (current) =>
+        current.map(
+          (item) =>
+            item.id === id
+              ? {
+                  ...item,
+                  availableForPlanning:
+                    available,
+                }
+              : item,
+        ),
     )
   }
 
@@ -918,12 +961,17 @@ export default function HomePage() {
 
     const { error } =
       await supabase
-        .from("meal_plan_days")
+        .from(
+          "meal_plan_days",
+        )
         .update({
           completed_at:
             completedAt,
         })
-        .eq("id", day.id)
+        .eq(
+          "id",
+          day.id,
+        )
 
     if (error) {
       console.error(
@@ -933,27 +981,37 @@ export default function HomePage() {
       return
     }
 
-    setWeeklyDays((current) =>
-      current.map((item) =>
-        item.id === day.id
-          ? {
-              ...item,
-              completedAt,
-            }
-          : item,
-      ),
+    setWeeklyDays(
+      (current) =>
+        current.map(
+          (item) =>
+            item.id === day.id
+              ? {
+                  ...item,
+                  completedAt,
+                }
+              : item,
+        ),
     )
   }
 
   async function changeActualMeal(
     day: WeeklyMealDay,
-    actualGravyRecipeId: string | null,
-    actualPoriyalRecipeId: string | null,
-    actualMealNote: string | null,
+    actualGravyRecipeId:
+      | string
+      | null,
+    actualPoriyalRecipeId:
+      | string
+      | null,
+    actualMealNote:
+      | string
+      | null,
   ) {
     const { error } =
       await supabase
-        .from("meal_plan_days")
+        .from(
+          "meal_plan_days",
+        )
         .update({
           actual_gravy_recipe_id:
             actualGravyRecipeId,
@@ -962,7 +1020,10 @@ export default function HomePage() {
           actual_meal_note:
             actualMealNote,
         })
-        .eq("id", day.id)
+        .eq(
+          "id",
+          day.id,
+        )
 
     if (error) {
       console.error(
@@ -972,29 +1033,791 @@ export default function HomePage() {
       return
     }
 
-    setWeeklyDays((current) =>
-      current.map((item) =>
-        item.id === day.id
-          ? {
-              ...item,
-              actualGravyRecipeId,
-              actualPoriyalRecipeId,
-              actualMealNote,
-            }
-          : item,
-      ),
+    setWeeklyDays(
+      (current) =>
+        current.map(
+          (item) =>
+            item.id === day.id
+              ? {
+                  ...item,
+                  actualGravyRecipeId,
+                  actualPoriyalRecipeId,
+                  actualMealNote,
+                }
+              : item,
+        ),
     )
   }
 
-  const planningPantry =
-    useMemo(
-      () =>
-        pantry.filter(
-          (item) =>
-            item.availableForPlanning,
-        ),
-      [pantry],
+  async function getGeminiSettings() {
+    const apiKey =
+      typeof window !== "undefined"
+        ? window.sessionStorage.getItem(
+            "meal-planner-gemini-api-key",
+          )
+        : null
+
+    const model =
+      typeof window !== "undefined"
+        ? window.sessionStorage.getItem(
+            "meal-planner-gemini-model",
+          ) ?? "gemini-3.8-flash"
+        : "gemini-3.8-flash"
+
+    if (!apiKey) {
+      throw new Error(
+        "Add your Gemini API key in Gemini AI settings before generating a meal plan.",
+      )
+    }
+
+    return { apiKey, model }
+  }
+
+  async function callPlannerAI(
+    action: "planner" | "planner-day",
+    context: Record<string, unknown>,
+  ) {
+    const { apiKey, model } =
+      await getGeminiSettings()
+
+    const prompt = JSON.stringify(
+      context,
+      null,
+      2,
     )
+
+    const response = await fetch(
+      "/api/ai",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          action,
+          apiKey,
+          model,
+          prompt,
+          input: prompt,
+          context,
+        }),
+      },
+    )
+
+    const payload = await response.json()
+
+    if (!response.ok) {
+      throw new Error(
+        payload?.error ??
+          "Gemini meal planning failed.",
+      )
+    }
+
+    let result =
+      payload?.data ??
+      payload?.result ??
+      payload?.output ??
+      payload
+
+    if (
+      typeof result === "string"
+    ) {
+      try {
+        result = JSON.parse(result)
+      } catch {
+        throw new Error(
+          "Gemini returned an invalid meal plan.",
+        )
+      }
+    }
+
+    if (
+      result?.text &&
+      typeof result.text === "string"
+    ) {
+      try {
+        result = JSON.parse(result.text)
+      } catch {
+        // Keep the original result when text is not JSON.
+      }
+    }
+
+    return result
+  }
+
+  async function loadPlannerAIContext() {
+    const { data: recipeData, error: recipeError } =
+      await supabase
+        .from("recipes")
+        .select(
+          "id, name, type, description, servings, notes",
+        )
+        .eq(
+          "household_id",
+          HOUSEHOLD_ID,
+        )
+        .order(
+          "name",
+          { ascending: true },
+        )
+
+    if (recipeError) {
+      throw recipeError
+    }
+
+    const recipeIds =
+      (recipeData ?? []).map(
+        (recipe) => recipe.id,
+      )
+
+    let ingredientData: any[] = []
+
+    if (recipeIds.length > 0) {
+      const {
+        data,
+        error,
+      } = await supabase
+        .from("recipe_ingredients")
+        .select(
+          "recipe_id, ingredient_name, quantity, unit, required",
+        )
+        .in(
+          "recipe_id",
+          recipeIds,
+        )
+
+      if (error) {
+        throw error
+      }
+
+      ingredientData = data ?? []
+    }
+
+    const {
+      data: historyData,
+      error: historyError,
+    } = await supabase
+      .from("meal_history")
+      .select(
+        "recipe_id, cooked_at, rating, notes",
+      )
+      .eq(
+        "household_id",
+        HOUSEHOLD_ID,
+      )
+      .order(
+        "cooked_at",
+        { ascending: false },
+      )
+      .limit(100)
+
+    if (historyError) {
+      throw historyError
+    }
+
+    const ingredientsByRecipe =
+      new Map<string, unknown[]>()
+
+    for (
+      const ingredient of ingredientData
+    ) {
+      const current =
+        ingredientsByRecipe.get(
+          ingredient.recipe_id,
+        ) ?? []
+
+      current.push({
+        name: ingredient.ingredient_name,
+        quantity:
+          ingredient.quantity,
+        unit: ingredient.unit,
+        required:
+          ingredient.required,
+      })
+
+      ingredientsByRecipe.set(
+        ingredient.recipe_id,
+        current,
+      )
+    }
+
+    const recipeNameById =
+      new Map(
+        (recipeData ?? []).map(
+          (recipe) => [
+            recipe.id,
+            recipe.name,
+          ],
+        ),
+      )
+
+    const history =
+      (historyData ?? []).map(
+        (item) => ({
+          recipe_id:
+            item.recipe_id,
+          recipe_name:
+            recipeNameById.get(
+              item.recipe_id,
+            ) ?? null,
+          cooked_at:
+            item.cooked_at,
+          rating:
+            item.rating,
+          notes:
+            item.notes,
+        }),
+      )
+
+    return {
+      week_start: weekStart,
+      dates: weekDates,
+      date_restrictions:
+        weekDates.map((date) => {
+          const restriction =
+            dateRestrictions.find(
+              (item) =>
+                item.date === date,
+            )
+
+          return {
+            date,
+            no_onion:
+              restriction?.noOnion ??
+              false,
+            no_garlic:
+              restriction?.noGarlic ??
+              false,
+            additional_restrictions:
+              restriction?.additionalRestrictions ?? "",
+          }
+        }),
+      pantry: pantry.map(
+        (item) => ({
+          id: item.id,
+          name: item.name,
+          quantity: item.quantity,
+          unit: item.unit,
+          available_for_planning:
+            item.availableForPlanning,
+        }),
+      ),
+      recipes: (recipeData ?? []).map(
+        (recipe) => ({
+          id: recipe.id,
+          name: recipe.name,
+          type: recipe.type,
+          description:
+            recipe.description,
+          servings:
+            recipe.servings,
+          notes: recipe.notes,
+          ingredients:
+            ingredientsByRecipe.get(
+              recipe.id,
+            ) ?? [],
+        }),
+      ),
+      meal_history: history,
+      planning_rules: {
+        vegetarian: true,
+        eggs: false,
+        meat: false,
+        days_per_week: 7,
+        gravy_per_day: 1,
+        poriyal_per_day: 1,
+        protein_target_g_per_person: {
+          min: 90,
+          max: 100,
+        },
+        fibre_target_g_per_person: 30,
+        no_global_onion_preference: true,
+        no_global_garlic_preference: true,
+        date_restrictions_only: true,
+        max_consecutive_days_using_onion: 2,
+        max_consecutive_days_using_garlic: 2,
+        legume_and_tofu_same_day: false,
+        legume_and_soy_same_day: false,
+        use_saved_recipes_when_possible: true,
+        prefer_pantry_ingredients: true,
+      },
+    }
+  }
+
+  function getGeneratedDays(result: any) {
+    const candidate =
+      result?.days ??
+      result?.meal_plan ??
+      result?.plan?.days ??
+      result?.plan ??
+      []
+
+    return Array.isArray(candidate)
+      ? candidate
+      : []
+  }
+
+  function resolveRecipeId(
+    value: unknown,
+    recipes: Array<{
+      id: string
+      name: string
+      type: string
+    }>,
+    expectedType:
+      | "gravy"
+      | "poriyal",
+  ) {
+    if (
+      typeof value !== "string"
+    ) {
+      return null
+    }
+
+    const byId =
+      recipes.find(
+        (recipe) =>
+          recipe.id === value &&
+          recipe.type === expectedType,
+      )
+
+    if (byId) {
+      return byId.id
+    }
+
+    const normalized =
+      value.trim().toLowerCase()
+
+    const byName =
+      recipes.find(
+        (recipe) =>
+          recipe.type ===
+            expectedType &&
+          recipe.name
+            .trim()
+            .toLowerCase() ===
+            normalized,
+      )
+
+    return byName?.id ?? null
+  }
+
+  function getDayRecipeValue(
+    day: any,
+    type: "gravy" | "poriyal",
+  ) {
+    if (type === "gravy") {
+      return (
+        day?.gravy_recipe_id ??
+        day?.gravyRecipeId ??
+        day?.gravy_recipe ??
+        day?.gravyRecipe ??
+        day?.gravy_recipe_name ??
+        day?.gravyRecipeName ??
+        null
+      )
+    }
+
+    return (
+      day?.poriyal_recipe_id ??
+      day?.poriyalRecipeId ??
+      day?.poriyal_recipe ??
+      day?.poriyalRecipe ??
+      day?.poriyal_recipe_name ??
+      day?.poriyalRecipeName ??
+      null
+    )
+  }
+
+  async function saveGeneratedWeek(
+    generatedDays: any[],
+  ) {
+    if (
+      generatedDays.length !== 7
+    ) {
+      throw new Error(
+        "Gemini did not return a complete 7-day meal plan.",
+      )
+    }
+
+    const {
+      data: recipeData,
+      error: recipeError,
+    } = await supabase
+      .from("recipes")
+      .select("id, name, type")
+      .eq(
+        "household_id",
+        HOUSEHOLD_ID,
+      )
+
+    if (recipeError) {
+      throw recipeError
+    }
+
+    const recipeCatalog =
+      recipeData ?? []
+
+    const generatedByDate =
+      new Map<string, any>()
+
+    for (
+      const generated of generatedDays
+    ) {
+      const date =
+        generated?.date ??
+        generated?.day_date ??
+        generated?.dayDate
+
+      if (typeof date === "string") {
+        generatedByDate.set(
+          date,
+          generated,
+        )
+      }
+    }
+
+    const normalizedDays =
+      weekDates.map((date) => {
+        const generated =
+          generatedByDate.get(
+            date,
+          )
+
+        if (!generated) {
+          throw new Error(
+            `Gemini did not return a plan for ${date}.`,
+          )
+        }
+
+        const gravyRecipeId =
+          resolveRecipeId(
+            getDayRecipeValue(
+              generated,
+              "gravy",
+            ),
+            recipeCatalog,
+            "gravy",
+          )
+
+        const poriyalRecipeId =
+          resolveRecipeId(
+            getDayRecipeValue(
+              generated,
+              "poriyal",
+            ),
+            recipeCatalog,
+            "poriyal",
+          )
+
+        if (
+          !gravyRecipeId ||
+          !poriyalRecipeId
+        ) {
+          throw new Error(
+            `Gemini returned an invalid recipe selection for ${date}.`,
+          )
+        }
+
+        const previous =
+          weeklyDays.find(
+            (day) =>
+              day.dayDate ===
+              date,
+          )
+
+        return {
+          day_date: date,
+          gravy_recipe_id:
+            gravyRecipeId,
+          poriyal_recipe_id:
+            poriyalRecipeId,
+          breakfast_note:
+            generated?.breakfast_note ??
+            generated?.breakfastNote ??
+            null,
+          dinner_note:
+            generated?.dinner_note ??
+            generated?.dinnerNote ??
+            null,
+          reason:
+            generated?.reason ??
+            null,
+          estimated_protein_g:
+            generated?.estimated_protein_g ??
+            generated?.estimatedProteinG ??
+            null,
+          estimated_fibre_g:
+            generated?.estimated_fibre_g ??
+            generated?.estimatedFibreG ??
+            null,
+          warnings:
+            Array.isArray(
+              generated?.warnings,
+            )
+              ? generated.warnings
+              : [],
+          actual_gravy_recipe_id:
+            previous?.actualGravyRecipeId ??
+            null,
+          actual_poriyal_recipe_id:
+            previous?.actualPoriyalRecipeId ??
+            null,
+          actual_meal_note:
+            previous?.actualMealNote ??
+            null,
+          completed_at:
+            previous?.completedAt ??
+            null,
+        }
+      })
+
+    const {
+      data: plan,
+      error: planError,
+    } = await supabase
+      .from("meal_plans")
+      .insert({
+        household_id:
+          HOUSEHOLD_ID,
+        week_start:
+          weekStart,
+        title:
+          "AI Meal Plan",
+      })
+      .select("id")
+      .single()
+
+    if (planError || !plan) {
+      throw (
+        planError ??
+        new Error(
+          "Could not create the meal plan.",
+        )
+      )
+    }
+
+    const {
+      error: dayError,
+    } = await supabase
+      .from("meal_plan_days")
+      .insert(
+        normalizedDays.map(
+          (day) => ({
+            meal_plan_id:
+              plan.id,
+            ...day,
+          }),
+        ),
+      )
+
+    if (dayError) {
+      await supabase
+        .from("meal_plans")
+        .delete()
+        .eq("id", plan.id)
+
+      throw dayError
+    }
+
+    await loadWeeklyPlan()
+  }
+
+  async function generatePlan() {
+    setGenerating(true)
+
+    try {
+      setCurrentView("week")
+
+      const context =
+        await loadPlannerAIContext()
+
+      const result =
+        await callPlannerAI(
+          "planner",
+          {
+            ...context,
+            task:
+              `Generate a complete 7-day weekly meal plan for exactly these dates, in Monday-to-Sunday order: ${weekDates.join(", ")}. Return exactly one gravy recipe and one poriyal recipe for every one of those dates. Never add dates outside this range. Respect every date's onion/garlic restriction and additional restrictions/unavailable ingredients. Use recipe IDs from the supplied recipe catalogue whenever possible. Never invent recipe IDs.`,
+          },
+        )
+
+      await saveGeneratedWeek(
+        getGeneratedDays(result),
+      )
+    } catch (error) {
+      console.error(
+        "Could not generate meal plan:",
+        error,
+      )
+
+      alert(
+        error instanceof Error
+          ? error.message
+          : "Could not generate the meal plan.",
+      )
+    } finally {
+      setGenerating(false)
+    }
+  }
+
+  async function regenerateDay(
+    day: WeeklyMealDay,
+  ) {
+    setGenerating(true)
+
+    try {
+      const context =
+        await loadPlannerAIContext()
+
+      const result =
+        await callPlannerAI(
+          "planner-day",
+          {
+            ...context,
+            target_date:
+              day.dayDate,
+            existing_day: {
+              date:
+                day.dayDate,
+              gravy_recipe_id:
+                day.gravyRecipeId,
+              poriyal_recipe_id:
+                day.poriyalRecipeId,
+              actual_gravy_recipe_id:
+                day.actualGravyRecipeId,
+              actual_poriyal_recipe_id:
+                day.actualPoriyalRecipeId,
+              completed_at:
+                day.completedAt,
+              additional_restrictions:
+                dateRestrictions.find((item) => item.date === day.dayDate)?.additionalRestrictions ?? "",
+            },
+            task:
+              "Regenerate only this date. Return exactly one gravy recipe and one poriyal recipe for the target date. Respect that date's onion/garlic restrictions, additional restrictions, unavailable ingredients, pantry availability, and all planner rules. Do not change any other date.",
+          },
+        )
+
+      const generatedDays =
+        getGeneratedDays(result)
+
+      const generated =
+        generatedDays.find(
+          (item: any) =>
+            (
+              item?.date ??
+              item?.day_date ??
+              item?.dayDate
+            ) ===
+            day.dayDate,
+        ) ??
+        generatedDays[0] ??
+        result?.day ??
+        result
+
+      const {
+        data: recipeData,
+        error: recipeError,
+      } = await supabase
+        .from("recipes")
+        .select("id, name, type")
+        .eq(
+          "household_id",
+          HOUSEHOLD_ID,
+        )
+
+      if (recipeError) {
+        throw recipeError
+      }
+
+      const gravyRecipeId =
+        resolveRecipeId(
+          getDayRecipeValue(
+            generated,
+            "gravy",
+          ),
+          recipeData ?? [],
+          "gravy",
+        )
+
+      const poriyalRecipeId =
+        resolveRecipeId(
+          getDayRecipeValue(
+            generated,
+            "poriyal",
+          ),
+          recipeData ?? [],
+          "poriyal",
+        )
+
+      if (
+        !gravyRecipeId ||
+        !poriyalRecipeId
+      ) {
+        throw new Error(
+          `Gemini returned an invalid meal for ${day.dayDate}.`,
+        )
+      }
+
+      const { error } =
+        await supabase
+          .from("meal_plan_days")
+          .update({
+            gravy_recipe_id:
+              gravyRecipeId,
+            poriyal_recipe_id:
+              poriyalRecipeId,
+            breakfast_note:
+              generated?.breakfast_note ??
+              generated?.breakfastNote ??
+              null,
+            dinner_note:
+              generated?.dinner_note ??
+              generated?.dinnerNote ??
+              null,
+            reason:
+              generated?.reason ??
+              null,
+            estimated_protein_g:
+              generated?.estimated_protein_g ??
+              generated?.estimatedProteinG ??
+              null,
+            estimated_fibre_g:
+              generated?.estimated_fibre_g ??
+              generated?.estimatedFibreG ??
+              null,
+            warnings:
+              Array.isArray(
+                generated?.warnings,
+              )
+                ? generated.warnings
+                : [],
+          })
+          .eq(
+            "id",
+            day.id,
+          )
+
+      if (error) {
+        throw error
+      }
+
+      await loadWeeklyPlan()
+    } catch (error) {
+      console.error(
+        "Could not regenerate day:",
+        error,
+      )
+
+      alert(
+        error instanceof Error
+          ? error.message
+          : "Could not regenerate this day.",
+      )
+    } finally {
+      setGenerating(false)
+    }
+  }
 
   function goWeek() {
     setCurrentView("week")
@@ -1099,227 +1922,190 @@ export default function HomePage() {
     )
   }
 
-  if (
-    currentView ===
-    "planner"
-  ) {
-    return (
-      <main className="mx-auto min-h-dvh w-full max-w-md px-4 pb-24">
-        <div className="pt-4">
-          <MealPlanner
-            householdId={
-              HOUSEHOLD_ID
-            }
-            pantry={
-              planningPantry
-            }
-            preferences={
-              preferences
-            }
-            dateRestrictions={
-              dateRestrictions
-            }
-            onBack={
-              goWeek
-            }
-            onSaved={
-              goWeek
-            }
-          />
-        </div>
-      </main>
-    )
-  }
-
   return (
-    <main className="mx-auto min-h-dvh w-full max-w-md px-4 pb-24">
-      <div className="flex flex-col gap-5 pt-4">
-        <AppHeader />
+    <>
+      <main className="mx-auto min-h-dvh w-full max-w-md px-4 pb-24">
+        <div className="flex flex-col gap-5 pt-4">
+          <AppHeader />
 
-        {/* THIS WEEK */}
-        {currentView ===
-          "week" && (
-          <>
-            <div className="flex items-center justify-between gap-3">
+          {/* WEEK */}
+          {currentView ===
+            "week" && (
+            <>
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm text-muted-foreground">
+                    This week
+                  </p>
+
+                  <h1 className="text-2xl font-bold tracking-tight">
+                    Meal Plan
+                  </h1>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    setAISettingsOpen(
+                      true,
+                    )
+                  }
+                  className="flex size-10 items-center justify-center rounded-full border border-border bg-background"
+                  aria-label="Gemini AI settings"
+                >
+                  <Settings className="size-5" />
+                </button>
+              </div>
+
+              {saving && (
+                <p className="text-center text-xs text-muted-foreground">
+                  Saving…
+                </p>
+              )}
+
+              <MealPlanner
+                householdId={
+                  HOUSEHOLD_ID
+                }
+                weekStart={
+                  weekStart
+                }
+                days={
+                  weeklyDays
+                }
+                pantry={
+                  pantry
+                }
+                dateRestrictions={
+                  dateRestrictions
+                }
+                recipes={
+                  weeklyRecipes
+                }
+                loading={
+                  weekLoading
+                }
+                generating={
+                  generating
+                }
+                onWeekChange={(
+                  nextWeek,
+                ) => {
+                  setWeekStart(
+                    normalizeWeekStart(nextWeek),
+                  )
+                }}
+                onToggleDateRestriction={
+                  toggleDateRestriction
+                }
+                onChangeAdditionalRestriction={
+                  changeAdditionalRestriction
+                }
+                onTogglePantry={
+                  togglePlanningAvailability
+                }
+                onGenerate={
+                  generatePlan
+                }
+                onRegenerateDay={
+                  regenerateDay
+                }
+                onMarkCooked={
+                  markCooked
+                }
+                onChangeMeal={
+                  changeActualMeal
+                }
+              />
+            </>
+          )}
+
+          {/* PANTRY */}
+          {currentView ===
+            "pantry" && (
+            <>
               <div>
                 <p className="text-sm text-muted-foreground">
-                  This week
+                  Ingredients available at home
                 </p>
 
                 <h1 className="text-2xl font-bold tracking-tight">
-                  Meal Plan
+                  Pantry
                 </h1>
               </div>
 
-              <button
-                type="button"
-                onClick={() =>
-                  setAISettingsOpen(
-                    true,
-                  )
+              <PantrySection
+                items={pantry}
+                onAdd={
+                  addIngredient
                 }
-                className="flex size-10 items-center justify-center rounded-full border border-border bg-background"
-                aria-label="Gemini AI settings"
-              >
-                <Settings className="size-5" />
-              </button>
-            </div>
+                onRemove={
+                  removeIngredient
+                }
+                onUpdate={
+                  updatePantryItem
+                }
+                onTogglePlanning={
+                  togglePlanningAvailability
+                }
+              />
+            </>
+          )}
 
-            <DietaryPreferences
-              preferences={
-                preferences
-              }
-              onToggle={
-                togglePreference
-              }
-              dateRestrictions={
-                dateRestrictions
-              }
-              onToggleDateRestriction={
-                toggleDateRestriction
-              }
-            />
+          {/* RECIPES */}
+          {currentView ===
+            "recipes" && (
+            <>
+              <div>
+                <p className="text-sm text-muted-foreground">
+                  Your saved dishes
+                </p>
 
-            {saving && (
-              <p className="text-center text-xs text-muted-foreground">
-                Saving…
-              </p>
-            )}
+                <h1 className="text-2xl font-bold tracking-tight">
+                  Recipes
+                </h1>
+              </div>
 
-            <WeeklyMealPlan
-              weekStart={
-                weekStart
-              }
-              days={
-                weeklyDays
-              }
-              recipes={
-                weeklyRecipes
-              }
-              loading={
-                weekLoading
-              }
-              onGenerate={() =>
-                setCurrentView(
-                  "planner",
-                )
-              }
-              onMarkCooked={
-                markCooked
-              }
-              onChangeMeal={
-                changeActualMeal
-              }
-            />
-
-            {weeklyDays.length >
-              0 && (
-              <button
-                type="button"
-                onClick={() =>
+              <RecipeList
+                householdId={
+                  HOUSEHOLD_ID
+                }
+                onAddRecipe={() =>
                   setCurrentView(
-                    "planner",
+                    "add-recipe",
                   )
                 }
-                className="flex w-full items-center justify-center gap-2 rounded-xl border border-border bg-background px-4 py-3 text-sm font-semibold"
-              >
-                <CalendarDays className="size-4" />
-                Generate / Update This Week
-              </button>
-            )}
-          </>
-        )}
+                onAddAIRecipe={() =>
+                  setCurrentView(
+                    "ai-recipe",
+                  )
+                }
+                onCookRecipe={(recipeId: string) => {
+                  setSelectedRecipeId(
+                    recipeId,
+                  )
+                  setCurrentView(
+                    "cook",
+                  )
+                }}
+              />
+            </>
+          )}
+        </div>
+      </main>
 
-        {/* PANTRY */}
-        {currentView ===
-          "pantry" && (
-          <>
-            <div>
-              <p className="text-sm text-muted-foreground">
-                Ingredients available at home
-              </p>
-
-              <h1 className="text-2xl font-bold tracking-tight">
-                Pantry
-              </h1>
-            </div>
-
-            <PantrySection
-              items={pantry}
-              onAdd={
-                addIngredient
-              }
-              onRemove={
-                removeIngredient
-              }
-              onUpdate={
-                updatePantryItem
-              }
-              onTogglePlanning={
-                togglePlanningAvailability
-              }
-            />
-          </>
-        )}
-
-        {/* RECIPES */}
-        {currentView ===
-          "recipes" && (
-          <>
-            <div>
-              <p className="text-sm text-muted-foreground">
-                Your saved dishes
-              </p>
-
-              <h1 className="text-2xl font-bold tracking-tight">
-                Recipes
-              </h1>
-            </div>
-
-            <RecipeList
-              householdId={
-                HOUSEHOLD_ID
-              }
-              onAddRecipe={() =>
-                setCurrentView(
-                  "add-recipe",
-                )
-              }
-              onAddAIRecipe={() =>
-                setCurrentView(
-                  "ai-recipe",
-                )
-              }
-              onCookRecipe={(
-                recipeId,
-              ) => {
-                setSelectedRecipeId(
-                  recipeId,
-                )
-                setCurrentView(
-                  "cook",
-                )
-              }}
-            />
-          </>
-        )}
-      </div>
-
-      {/* Bottom navigation */}
-      <nav
-        aria-label="Main navigation"
-        className="fixed inset-x-0 bottom-0 z-50 mx-auto w-full max-w-md border-t border-border bg-background/95 px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur"
-      >
-        <div className="grid grid-cols-3 gap-1">
+      {/* BOTTOM NAVIGATION */}
+      <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-background/95 backdrop-blur">
+        <div className="mx-auto grid max-w-md grid-cols-3">
           <button
             type="button"
             onClick={
               goWeek
             }
-            className={`flex flex-col items-center justify-center gap-1 rounded-xl px-2 py-2 text-xs font-medium ${
+            className={`flex flex-col items-center gap-1 px-3 py-3 text-xs font-semibold ${
               currentView ===
-              "week"
-                ? "bg-primary text-primary-foreground"
+                "week"
+                ? "text-primary"
                 : "text-muted-foreground"
             }`}
           >
@@ -1332,10 +2118,10 @@ export default function HomePage() {
             onClick={
               goPantry
             }
-            className={`flex flex-col items-center justify-center gap-1 rounded-xl px-2 py-2 text-xs font-medium ${
+            className={`flex flex-col items-center gap-1 px-3 py-3 text-xs font-semibold ${
               currentView ===
-              "pantry"
-                ? "bg-primary text-primary-foreground"
+                "pantry"
+                ? "text-primary"
                 : "text-muted-foreground"
             }`}
           >
@@ -1348,10 +2134,10 @@ export default function HomePage() {
             onClick={
               goRecipes
             }
-            className={`flex flex-col items-center justify-center gap-1 rounded-xl px-2 py-2 text-xs font-medium ${
+            className={`flex flex-col items-center gap-1 px-3 py-3 text-xs font-semibold ${
               currentView ===
-              "recipes"
-                ? "bg-primary text-primary-foreground"
+                "recipes"
+                ? "text-primary"
                 : "text-muted-foreground"
             }`}
           >
@@ -1361,18 +2147,16 @@ export default function HomePage() {
         </div>
       </nav>
 
-      {aiSettingsOpen && (
-        <AISettings
-          open={
-            aiSettingsOpen
-          }
-          onClose={() =>
-            setAISettingsOpen(
-              false,
-            )
-          }
-        />
-      )}
-    </main>
+      <AISettings
+        open={
+          aiSettingsOpen
+        }
+        onClose={() =>
+          setAISettingsOpen(
+            false,
+          )
+        }
+      />
+    </>
   )
 }
