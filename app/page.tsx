@@ -18,6 +18,7 @@ import { AIRecipeAssistant } from "@/components/ai-recipe-assistant"
 import {
   MealPlanner,
   type DateRestriction,
+  type LunchStyle,
   type PantryItem,
   type WeeklyMealDay,
   type WeeklyRecipe,
@@ -156,7 +157,7 @@ export default function HomePage() {
         "dietary_date_restrictions",
       )
       .select(
-        "restriction_date, no_onion, no_garlic, additional_restrictions",
+        "restriction_date, no_onion, no_garlic, additional_restrictions, pantry_only, lunch_style",
       )
       .eq(
         "household_id",
@@ -196,6 +197,8 @@ export default function HomePage() {
           noGarlic: Boolean(
             item.no_garlic,
           ),
+          pantryOnly: Boolean(item.pantry_only),
+          lunchStyle: item.lunch_style ?? "planner_choice",
           additionalRestrictions:
             item.additional_restrictions ?? "",
         }),
@@ -316,6 +319,8 @@ export default function HomePage() {
           `
             id,
             day_date,
+            lunch_style,
+            main_recipe_id,
             gravy_recipe_id,
             poriyal_recipe_id,
             breakfast_note,
@@ -324,6 +329,7 @@ export default function HomePage() {
             estimated_protein_g,
             estimated_fibre_g,
             warnings,
+            actual_main_recipe_id,
             actual_gravy_recipe_id,
             actual_poriyal_recipe_id,
             actual_meal_note,
@@ -381,6 +387,10 @@ export default function HomePage() {
         const day of
           dayData ?? []
       ) {
+        if (day.main_recipe_id) {
+          recipeIds.add(day.main_recipe_id)
+        }
+
         if (
           day.gravy_recipe_id
         ) {
@@ -395,6 +405,10 @@ export default function HomePage() {
           recipeIds.add(
             day.poriyal_recipe_id,
           )
+        }
+
+        if (day.actual_main_recipe_id) {
+          recipeIds.add(day.actual_main_recipe_id)
         }
 
         if (
@@ -459,6 +473,18 @@ export default function HomePage() {
 
             dayDate:
               day.day_date,
+
+            lunchStyle:
+              day.lunch_style ??
+              "planner_choice",
+
+            mainRecipeId:
+              day.main_recipe_id ??
+              null,
+
+            actualMainRecipeId:
+              day.actual_main_recipe_id ??
+              null,
 
             gravyRecipeId:
               day.gravy_recipe_id ??
@@ -539,6 +565,8 @@ export default function HomePage() {
         noOnion: false,
         noGarlic: false,
         additionalRestrictions: "",
+        pantryOnly: false,
+        lunchStyle: "planner_choice",
       }
 
     const next: DateRestriction =
@@ -577,7 +605,9 @@ export default function HomePage() {
     if (
       !next.noOnion &&
       !next.noGarlic &&
-      !next.additionalRestrictions.trim()
+      !next.additionalRestrictions.trim() &&
+      !next.pantryOnly &&
+      next.lunchStyle === "planner_choice"
     ) {
       const { error } =
         await supabase
@@ -618,6 +648,10 @@ export default function HomePage() {
                 next.noGarlic,
               additional_restrictions:
                 next.additionalRestrictions ?? "",
+              pantry_only:
+                next.pantryOnly,
+              lunch_style:
+                next.lunchStyle,
               updated_at:
                 new Date().toISOString(),
             },
@@ -638,6 +672,73 @@ export default function HomePage() {
     setSaving(false)
   }
 
+  async function changeDatePlanning(
+    date: string,
+    key: "pantryOnly" | "lunchStyle",
+    value: boolean | LunchStyle,
+  ) {
+    const current =
+      dateRestrictions.find((item) => item.date === date) ?? {
+        date,
+        noOnion: false,
+        noGarlic: false,
+        additionalRestrictions: "",
+        pantryOnly: false,
+        lunchStyle: "planner_choice" as const,
+      }
+
+    const next: DateRestriction = {
+      ...current,
+      [key]: value,
+    }
+
+    setDateRestrictions((items) => {
+      const exists = items.some((item) => item.date === date)
+      return exists
+        ? items.map((item) => (item.date === date ? next : item))
+        : [...items, next]
+    })
+
+    setSaving(true)
+    try {
+      const hasAnySetting =
+        next.noOnion ||
+        next.noGarlic ||
+        Boolean(next.additionalRestrictions.trim()) ||
+        next.pantryOnly ||
+        next.lunchStyle !== "planner_choice"
+
+      if (!hasAnySetting) {
+        const { error } = await supabase
+          .from("dietary_date_restrictions")
+          .delete()
+          .eq("household_id", HOUSEHOLD_ID)
+          .eq("restriction_date", date)
+        if (error) console.error("Could not remove date planning settings:", error)
+        return
+      }
+
+      const { error } = await supabase
+        .from("dietary_date_restrictions")
+        .upsert(
+          {
+            household_id: HOUSEHOLD_ID,
+            restriction_date: date,
+            no_onion: next.noOnion,
+            no_garlic: next.noGarlic,
+            additional_restrictions: next.additionalRestrictions,
+            pantry_only: next.pantryOnly,
+            lunch_style: next.lunchStyle,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: "household_id,restriction_date" },
+        )
+      if (error) console.error("Could not save date planning settings:", error)
+    } finally {
+      setSaving(false)
+    }
+  }
+
   async function changeAdditionalRestriction(
     date: string,
     value: string,
@@ -648,6 +749,8 @@ export default function HomePage() {
         noOnion: false,
         noGarlic: false,
         additionalRestrictions: "",
+        pantryOnly: false,
+        lunchStyle: "planner_choice",
       }
 
     const next: DateRestriction = {
@@ -664,7 +767,13 @@ export default function HomePage() {
 
     setSaving(true)
 
-    if (!next.noOnion && !next.noGarlic && !value.trim()) {
+    if (
+      !next.noOnion &&
+      !next.noGarlic &&
+      !value.trim() &&
+      !next.pantryOnly &&
+      next.lunchStyle === "planner_choice"
+    ) {
       const { error } = await supabase
         .from("dietary_date_restrictions")
         .delete()
@@ -684,6 +793,8 @@ export default function HomePage() {
             no_onion: next.noOnion,
             no_garlic: next.noGarlic,
             additional_restrictions: value.trim(),
+            pantry_only: next.pantryOnly,
+            lunch_style: next.lunchStyle,
             updated_at: new Date().toISOString(),
           },
           { onConflict: "household_id,restriction_date" },
@@ -997,77 +1108,60 @@ export default function HomePage() {
 
   async function changeActualMeal(
     day: WeeklyMealDay,
-    actualGravyRecipeId:
-      | string
-      | null,
-    actualPoriyalRecipeId:
-      | string
-      | null,
-    actualMealNote:
-      | string
-      | null,
+    actualMainRecipeId: string | null,
+    actualGravyRecipeId: string | null,
+    actualPoriyalRecipeId: string | null,
+    actualMealNote: string | null,
+    breakfastNote: string | null,
+    dinnerNote: string | null,
   ) {
-    const { error } =
-      await supabase
-        .from(
-          "meal_plan_days",
-        )
-        .update({
-          actual_gravy_recipe_id:
-            actualGravyRecipeId,
-          actual_poriyal_recipe_id:
-            actualPoriyalRecipeId,
-          actual_meal_note:
-            actualMealNote,
-        })
-        .eq(
-          "id",
-          day.id,
-        )
+    const { error } = await supabase
+      .from("meal_plan_days")
+      .update({
+        actual_main_recipe_id: actualMainRecipeId,
+        actual_gravy_recipe_id: actualGravyRecipeId,
+        actual_poriyal_recipe_id: actualPoriyalRecipeId,
+        actual_meal_note: actualMealNote,
+        breakfast_note: breakfastNote,
+        dinner_note: dinnerNote,
+      })
+      .eq("id", day.id)
 
     if (error) {
-      console.error(
-        "Could not update actual meal:",
-        error,
-      )
+      console.error("Could not update actual meal:", error)
       return
     }
 
-    setWeeklyDays(
-      (current) =>
-        current.map(
-          (item) =>
-            item.id === day.id
-              ? {
-                  ...item,
-                  actualGravyRecipeId,
-                  actualPoriyalRecipeId,
-                  actualMealNote,
-                }
-              : item,
-        ),
+    setWeeklyDays((current) =>
+      current.map((item) =>
+        item.id === day.id
+          ? {
+              ...item,
+              actualMainRecipeId,
+              actualGravyRecipeId,
+              actualPoriyalRecipeId,
+              actualMealNote,
+              breakfastNote,
+              dinnerNote,
+            }
+          : item,
+      ),
     )
   }
 
   async function getGeminiSettings() {
     const apiKey =
       typeof window !== "undefined"
-        ? window.sessionStorage.getItem(
-            "meal-planner-gemini-api-key",
-          )
+        ? window.sessionStorage.getItem("meal-planner-gemini-api-key")
         : null
 
     const model =
       typeof window !== "undefined"
-        ? window.sessionStorage.getItem(
-            "meal-planner-gemini-model",
-          ) ?? "gemini-3.8-flash"
-        : "gemini-3.8-flash"
+        ? window.sessionStorage.getItem("meal-planner-gemini-model") ?? "gemini-3.5-flash-lite"
+        : "gemini-3.5-flash-lite"
 
     if (!apiKey) {
-      throw new Error(
-        "Add your Gemini API key in Gemini AI settings before generating a meal plan.",
-      )
+      throw new Error("Add your Gemini API key in Gemini AI settings before generating a meal plan.")
     }
 
     return { apiKey, model }
@@ -1288,6 +1382,12 @@ export default function HomePage() {
             no_garlic:
               restriction?.noGarlic ??
               false,
+            pantry_only:
+              restriction?.pantryOnly ??
+              false,
+            lunch_style:
+              restriction?.lunchStyle ??
+              "planner_choice",
             additional_restrictions:
               restriction?.additionalRestrictions ?? "",
           }
@@ -1324,8 +1424,14 @@ export default function HomePage() {
         eggs: false,
         meat: false,
         days_per_week: 7,
-        gravy_per_day: 1,
-        poriyal_per_day: 1,
+        lunch_styles_allowed: [
+          "gravy_poriyal",
+          "dry_rice",
+          "planner_choice",
+        ],
+        breakfast_and_dinner_are_independent_tiffin_meals: true,
+        do_not_force_dosa: true,
+        do_not_force_gravy_every_day: true,
         protein_target_g_per_person: {
           min: 90,
           max: 100,
@@ -1404,8 +1510,20 @@ export default function HomePage() {
 
   function getDayRecipeValue(
     day: any,
-    type: "gravy" | "poriyal",
+    type: "main" | "gravy" | "poriyal",
   ) {
+    if (type === "main") {
+      return (
+        day?.main_recipe_id ??
+        day?.mainRecipeId ??
+        day?.main_recipe ??
+        day?.mainRecipe ??
+        day?.main_recipe_name ??
+        day?.mainRecipeName ??
+        null
+      )
+    }
+
     if (type === "gravy") {
       return (
         day?.gravy_recipe_id ??
@@ -1427,6 +1545,17 @@ export default function HomePage() {
       day?.poriyalRecipeName ??
       null
     )
+  }
+
+  function resolveAnyRecipeId(
+    value: unknown,
+    recipes: Array<{ id: string; name: string; type: string }>,
+  ) {
+    if (typeof value !== "string") return null
+    const byId = recipes.find((recipe) => recipe.id === value)
+    if (byId) return byId.id
+    const normalized = value.trim().toLowerCase()
+    return recipes.find((recipe) => recipe.name.trim().toLowerCase() === normalized)?.id ?? null
   }
 
   async function saveGeneratedWeek(
@@ -1477,100 +1606,62 @@ export default function HomePage() {
       }
     }
 
-    const normalizedDays =
-      weekDates.map((date) => {
-        const generated =
-          generatedByDate.get(
-            date,
-          )
+    const normalizedDays = weekDates.map((date) => {
+      const generated = generatedByDate.get(date)
+      if (!generated) throw new Error(`Gemini did not return a plan for ${date}.`)
 
-        if (!generated) {
-          throw new Error(
-            `Gemini did not return a plan for ${date}.`,
-          )
-        }
+      const requestedLunchStyle =
+        dateRestrictions.find((item) => item.date === date)?.lunchStyle ??
+        "planner_choice"
 
-        const gravyRecipeId =
-          resolveRecipeId(
-            getDayRecipeValue(
-              generated,
-              "gravy",
-            ),
-            recipeCatalog,
-            "gravy",
-          )
+      const generatedLunchStyle =
+        generated?.lunch_style ??
+        generated?.lunchStyle ??
+        null
 
-        const poriyalRecipeId =
-          resolveRecipeId(
-            getDayRecipeValue(
-              generated,
-              "poriyal",
-            ),
-            recipeCatalog,
-            "poriyal",
-          )
+      const lunchStyle =
+        generatedLunchStyle === "dry_rice"
+          ? "dry_rice"
+          : generatedLunchStyle === "gravy_poriyal"
+            ? "gravy_poriyal"
+            : requestedLunchStyle === "dry_rice"
+              ? "dry_rice"
+              : "gravy_poriyal"
 
-        if (
-          !gravyRecipeId ||
-          !poriyalRecipeId
-        ) {
-          throw new Error(
-            `Gemini returned an invalid recipe selection for ${date}.`,
-          )
-        }
+      const mainRecipeId = resolveAnyRecipeId(
+        getDayRecipeValue(generated, "main"),
+        recipeCatalog,
+      )
+      const gravyRecipeId = resolveRecipeId(getDayRecipeValue(generated, "gravy"), recipeCatalog, "gravy")
+      const poriyalRecipeId = resolveRecipeId(getDayRecipeValue(generated, "poriyal"), recipeCatalog, "poriyal")
 
-        const previous =
-          weeklyDays.find(
-            (day) =>
-              day.dayDate ===
-              date,
-          )
+      if (lunchStyle === "dry_rice" && !mainRecipeId) {
+        throw new Error(`Gemini returned an invalid dry-rice recipe for ${date}. Add dry-rice recipes to your recipe catalogue first.`)
+      }
+      if (lunchStyle !== "dry_rice" && !gravyRecipeId && !mainRecipeId) {
+        throw new Error(`Gemini returned no valid lunch main for ${date}.`)
+      }
 
-        return {
-          day_date: date,
-          gravy_recipe_id:
-            gravyRecipeId,
-          poriyal_recipe_id:
-            poriyalRecipeId,
-          breakfast_note:
-            generated?.breakfast_note ??
-            generated?.breakfastNote ??
-            null,
-          dinner_note:
-            generated?.dinner_note ??
-            generated?.dinnerNote ??
-            null,
-          reason:
-            generated?.reason ??
-            null,
-          estimated_protein_g:
-            generated?.estimated_protein_g ??
-            generated?.estimatedProteinG ??
-            null,
-          estimated_fibre_g:
-            generated?.estimated_fibre_g ??
-            generated?.estimatedFibreG ??
-            null,
-          warnings:
-            Array.isArray(
-              generated?.warnings,
-            )
-              ? generated.warnings
-              : [],
-          actual_gravy_recipe_id:
-            previous?.actualGravyRecipeId ??
-            null,
-          actual_poriyal_recipe_id:
-            previous?.actualPoriyalRecipeId ??
-            null,
-          actual_meal_note:
-            previous?.actualMealNote ??
-            null,
-          completed_at:
-            previous?.completedAt ??
-            null,
-        }
-      })
+      const previous = weeklyDays.find((item) => item.dayDate === date)
+      return {
+        day_date: date,
+        lunch_style: lunchStyle,
+        main_recipe_id: mainRecipeId,
+        gravy_recipe_id: lunchStyle === "dry_rice" ? null : gravyRecipeId,
+        poriyal_recipe_id: poriyalRecipeId,
+        breakfast_note: generated?.breakfast_note ?? generated?.breakfastNote ?? null,
+        dinner_note: generated?.dinner_note ?? generated?.dinnerNote ?? null,
+        reason: generated?.reason ?? null,
+        estimated_protein_g: generated?.estimated_protein_g ?? generated?.estimatedProteinG ?? null,
+        estimated_fibre_g: generated?.estimated_fibre_g ?? generated?.estimatedFibreG ?? null,
+        warnings: Array.isArray(generated?.warnings) ? generated.warnings : [],
+        actual_main_recipe_id: previous?.actualMainRecipeId ?? null,
+        actual_gravy_recipe_id: previous?.actualGravyRecipeId ?? null,
+        actual_poriyal_recipe_id: previous?.actualPoriyalRecipeId ?? null,
+        actual_meal_note: previous?.actualMealNote ?? null,
+        completed_at: previous?.completedAt ?? null,
+      }
+    })
 
     const {
       data: plan,
@@ -1638,7 +1729,7 @@ export default function HomePage() {
           {
             ...context,
             task:
-              `Generate a complete 7-day weekly meal plan for exactly these dates, in Monday-to-Sunday order: ${weekDates.join(", ")}. Return exactly one gravy recipe and one poriyal recipe for every one of those dates. Never add dates outside this range. Respect every date's onion/garlic restriction and additional restrictions/unavailable ingredients. Use recipe IDs from the supplied recipe catalogue whenever possible. Never invent recipe IDs.`,
+              `Generate a complete 7-day weekly meal plan for exactly these dates, in Monday-to-Sunday order: ${weekDates.join(", ")}. Never add dates outside this range. For each date, follow that date's pantry_only and lunch_style settings. A dry_rice day must use a dry-rice/main recipe and must not be forced into a gravy. A gravy_poriyal day should use a gravy and poriyal. Planner_choice should vary the week and must not force gravy every day. Breakfast and dinner are independent Indian vegetarian tiffin meals; do not assume dosa. Respect onion, garlic, additional restrictions and pantry-only rules. Use recipe IDs from the supplied recipe catalogue and never invent recipe IDs.`,
           },
         )
 
@@ -1661,161 +1752,84 @@ export default function HomePage() {
     }
   }
 
-  async function regenerateDay(
-    day: WeeklyMealDay,
-  ) {
+  async function regenerateDay(day: WeeklyMealDay) {
     setGenerating(true)
-
     try {
-      const context =
-        await loadPlannerAIContext()
+      const restriction = getRestrictionForDate(day.dayDate)
+      const context = await loadPlannerAIContext()
+      const result = await callPlannerAI("planner-day", {
+        ...context,
+        target_date: day.dayDate,
+        target_date_settings: restriction,
+        existing_day: {
+          date: day.dayDate,
+          lunch_style: day.lunchStyle,
+          main_recipe_id: day.mainRecipeId,
+          actual_main_recipe_id: day.actualMainRecipeId,
+          gravy_recipe_id: day.gravyRecipeId,
+          poriyal_recipe_id: day.poriyalRecipeId,
+          breakfast_note: day.breakfastNote,
+          dinner_note: day.dinnerNote,
+          actual_gravy_recipe_id: day.actualGravyRecipeId,
+          actual_poriyal_recipe_id: day.actualPoriyalRecipeId,
+          completed_at: day.completedAt,
+        },
+        task: `Regenerate only ${day.dayDate}. Respect its pantry_only=${restriction.pantryOnly}, lunch_style=${restriction.lunchStyle}, onion/garlic restrictions, additional restrictions and the currently available pantry. If pantry_only is true, do not use any ingredient outside the available pantry. If pantry_only is false, you may introduce ingredients that can be bought. Breakfast and dinner may be any suitable Indian vegetarian tiffin and should not be restricted to dosa. Do not change any other date.`,
+      })
 
-      const result =
-        await callPlannerAI(
-          "planner-day",
-          {
-            ...context,
-            target_date:
-              day.dayDate,
-            existing_day: {
-              date:
-                day.dayDate,
-              gravy_recipe_id:
-                day.gravyRecipeId,
-              poriyal_recipe_id:
-                day.poriyalRecipeId,
-              actual_gravy_recipe_id:
-                day.actualGravyRecipeId,
-              actual_poriyal_recipe_id:
-                day.actualPoriyalRecipeId,
-              completed_at:
-                day.completedAt,
-              additional_restrictions:
-                dateRestrictions.find((item) => item.date === day.dayDate)?.additionalRestrictions ?? "",
-            },
-            task:
-              "Regenerate only this date. Return exactly one gravy recipe and one poriyal recipe for the target date. Respect that date's onion/garlic restrictions, additional restrictions, unavailable ingredients, pantry availability, and all planner rules. Do not change any other date.",
-          },
-        )
+      const generatedDays = getGeneratedDays(result)
+      const generated = generatedDays.find((item: any) => (item?.date ?? item?.day_date ?? item?.dayDate) === day.dayDate) ?? generatedDays[0] ?? result?.day ?? result
 
-      const generatedDays =
-        getGeneratedDays(result)
-
-      const generated =
-        generatedDays.find(
-          (item: any) =>
-            (
-              item?.date ??
-              item?.day_date ??
-              item?.dayDate
-            ) ===
-            day.dayDate,
-        ) ??
-        generatedDays[0] ??
-        result?.day ??
-        result
-
-      const {
-        data: recipeData,
-        error: recipeError,
-      } = await supabase
+      const { data: recipeData, error: recipeError } = await supabase
         .from("recipes")
         .select("id, name, type")
-        .eq(
-          "household_id",
-          HOUSEHOLD_ID,
-        )
+        .eq("household_id", HOUSEHOLD_ID)
+      if (recipeError) throw recipeError
 
-      if (recipeError) {
-        throw recipeError
-      }
+      const generatedLunchStyle = generated?.lunch_style ?? generated?.lunchStyle ?? null
+      const lunchStyle =
+        generatedLunchStyle === "dry_rice"
+          ? "dry_rice"
+          : generatedLunchStyle === "gravy_poriyal"
+            ? "gravy_poriyal"
+            : restriction.lunchStyle === "dry_rice"
+              ? "dry_rice"
+              : "gravy_poriyal"
+      const mainRecipeId = resolveAnyRecipeId(getDayRecipeValue(generated, "main"), recipeData ?? [])
+      const gravyRecipeId = resolveRecipeId(getDayRecipeValue(generated, "gravy"), recipeData ?? [], "gravy")
+      const poriyalRecipeId = resolveRecipeId(getDayRecipeValue(generated, "poriyal"), recipeData ?? [], "poriyal")
 
-      const gravyRecipeId =
-        resolveRecipeId(
-          getDayRecipeValue(
-            generated,
-            "gravy",
-          ),
-          recipeData ?? [],
-          "gravy",
-        )
+      if (lunchStyle === "dry_rice" && !mainRecipeId) throw new Error(`Gemini returned an invalid dry-rice recipe for ${day.dayDate}.`)
+      if (lunchStyle !== "dry_rice" && !gravyRecipeId && !mainRecipeId) throw new Error(`Gemini returned no valid lunch main for ${day.dayDate}.`)
 
-      const poriyalRecipeId =
-        resolveRecipeId(
-          getDayRecipeValue(
-            generated,
-            "poriyal",
-          ),
-          recipeData ?? [],
-          "poriyal",
-        )
-
-      if (
-        !gravyRecipeId ||
-        !poriyalRecipeId
-      ) {
-        throw new Error(
-          `Gemini returned an invalid meal for ${day.dayDate}.`,
-        )
-      }
-
-      const { error } =
-        await supabase
-          .from("meal_plan_days")
-          .update({
-            gravy_recipe_id:
-              gravyRecipeId,
-            poriyal_recipe_id:
-              poriyalRecipeId,
-            breakfast_note:
-              generated?.breakfast_note ??
-              generated?.breakfastNote ??
-              null,
-            dinner_note:
-              generated?.dinner_note ??
-              generated?.dinnerNote ??
-              null,
-            reason:
-              generated?.reason ??
-              null,
-            estimated_protein_g:
-              generated?.estimated_protein_g ??
-              generated?.estimatedProteinG ??
-              null,
-            estimated_fibre_g:
-              generated?.estimated_fibre_g ??
-              generated?.estimatedFibreG ??
-              null,
-            warnings:
-              Array.isArray(
-                generated?.warnings,
-              )
-                ? generated.warnings
-                : [],
-          })
-          .eq(
-            "id",
-            day.id,
-          )
-
-      if (error) {
-        throw error
-      }
-
+      const { error } = await supabase
+        .from("meal_plan_days")
+        .update({
+          lunch_style: lunchStyle,
+          main_recipe_id: mainRecipeId,
+          gravy_recipe_id: lunchStyle === "dry_rice" ? null : gravyRecipeId,
+          poriyal_recipe_id: poriyalRecipeId,
+          breakfast_note: generated?.breakfast_note ?? generated?.breakfastNote ?? null,
+          dinner_note: generated?.dinner_note ?? generated?.dinnerNote ?? null,
+          reason: generated?.reason ?? null,
+          estimated_protein_g: generated?.estimated_protein_g ?? generated?.estimatedProteinG ?? null,
+          estimated_fibre_g: generated?.estimated_fibre_g ?? generated?.estimatedFibreG ?? null,
+          warnings: Array.isArray(generated?.warnings) ? generated.warnings : [],
+        })
+        .eq("id", day.id)
+      if (error) throw error
       await loadWeeklyPlan()
     } catch (error) {
-      console.error(
-        "Could not regenerate day:",
-        error,
-      )
-
-      alert(
-        error instanceof Error
-          ? error.message
-          : "Could not regenerate this day.",
-      )
+      console.error("Could not regenerate day:", error)
+      alert(error instanceof Error ? error.message : "Could not regenerate this day.")
     } finally {
       setGenerating(false)
+    }
+  }
+
+  function getRestrictionForDate(date: string): DateRestriction {
+    return dateRestrictions.find((item) => item.date === date) ?? {
+      date, noOnion: false, noGarlic: false, additionalRestrictions: "", pantryOnly: false, lunchStyle: "planner_choice",
     }
   }
 
@@ -2000,6 +2014,9 @@ export default function HomePage() {
                 }
                 onChangeAdditionalRestriction={
                   changeAdditionalRestriction
+                }
+                onChangeDatePlanning={
+                  changeDatePlanning
                 }
                 onTogglePantry={
                   togglePlanningAvailability

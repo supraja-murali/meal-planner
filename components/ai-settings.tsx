@@ -30,7 +30,7 @@ export function AISettings({
 }: AISettingsProps) {
   const [apiKey, setApiKey] = useState("")
   const [model, setModel] =
-    useState("gemini-3.8-flash")
+    useState("gemini-3.5-flash-lite")
 
   const [showKey, setShowKey] =
     useState(false)
@@ -61,7 +61,7 @@ export function AISettings({
 
     setModel(
       savedModel ??
-        "gemini-3.8-flash",
+        "gemini-3.5-flash-lite",
     )
 
     setMessage("")
@@ -267,13 +267,10 @@ export function AISettings({
               }
               className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
             >
-              <option value="gemini-3.8-flash">
-                Gemini 3.8 Flash
+              <option value="gemini-3.5-flash-lite">
+                Gemini 3.5 Flash Lite
               </option>
 
-              <option value="gemini-3.7-flash">
-                Gemini 3.7 Flash
-              </option>
             </select>
           </div>
 
@@ -331,7 +328,7 @@ export function getGeminiSettings() {
   ) {
     return {
       apiKey: "",
-      model: "gemini-3.8-flash",
+      model: "gemini-3.5-flash-lite",
     }
   }
 
@@ -345,6 +342,6 @@ export function getGeminiSettings() {
       window.sessionStorage.getItem(
         MODEL_STORAGE,
       ) ??
-      "gemini-3.8-flash",
+      "gemini-3.5-flash-lite",
   }
 }
