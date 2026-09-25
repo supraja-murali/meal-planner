@@ -36,6 +36,7 @@ type IngredientSuggestion = {
 type RecipeFormProps = {
   userId: string
   householdId: string
+  recipeId?: string | null
   onSaved?: () => void
   onCancel?: () => void
 }
@@ -65,6 +66,7 @@ function createEmptyIngredient(): RecipeIngredient {
 export function RecipeForm({
   userId,
   householdId,
+  recipeId,
   onSaved,
   onCancel,
 }: RecipeFormProps) {
@@ -105,6 +107,7 @@ export function RecipeForm({
     useRef<HTMLDivElement>(null)
 
   const [saving, setSaving] = useState(false)
+  const [loadingRecipe, setLoadingRecipe] = useState(false)
   const [error, setError] = useState("")
 
   // userId is retained because the parent already supplies it.
@@ -333,9 +336,141 @@ export function RecipeForm({
     )
   }
 
+  
   // ─────────────────────────────────────────────
   // Save recipe
   // ─────────────────────────────────────────────
+
+  useEffect(() => {
+    if (!recipeId) {
+      return
+    }
+
+    async function loadRecipe() {
+      setLoadingRecipe(true)
+      setError("")
+
+      try {
+        const [
+          recipeResult,
+          ingredientsResult,
+          stepsResult,
+        ] = await Promise.all([
+          supabase
+            .from("recipes")
+            .select(
+              "id, name, type, servings, notes",
+            )
+            .eq("id", recipeId)
+            .eq("household_id", householdId)
+            .single(),
+
+          supabase
+            .from("recipe_ingredients")
+            .select(
+              "ingredient_id, ingredient_name, quantity, unit, required",
+            )
+            .eq("recipe_id", recipeId)
+            .order("created_at", {
+              ascending: true,
+            }),
+
+          supabase
+            .from("recipe_steps")
+            .select(
+              "step_number, instruction",
+            )
+            .eq("recipe_id", recipeId)
+            .order("step_number", {
+              ascending: true,
+            }),
+        ])
+
+        if (recipeResult.error) {
+          throw recipeResult.error
+        }
+
+        if (ingredientsResult.error) {
+          throw ingredientsResult.error
+        }
+
+        if (stepsResult.error) {
+          throw stepsResult.error
+        }
+
+        const recipe = recipeResult.data
+
+        setName(recipe.name)
+        setType(
+          recipe.type as
+            | "gravy"
+            | "poriyal"
+            | "dry_rice"
+            | "other",
+        )
+        setServings(
+          String(recipe.servings ?? 2),
+        )
+        setNotes(recipe.notes ?? "")
+
+        setIngredients(
+          (ingredientsResult.data ?? []).map(
+            (ingredient) => ({
+              localId: crypto.randomUUID(),
+              ingredientName:
+                ingredient.ingredient_name,
+              quantity:
+                ingredient.quantity === null
+                  ? ""
+                  : String(
+                      ingredient.quantity,
+                    ),
+              unit:
+                ingredient.unit ?? "pcs",
+              required:
+                ingredient.required ?? true,
+              ingredientId:
+                ingredient.ingredient_id ??
+                undefined,
+            }),
+          ),
+        )
+
+        const loadedSteps =
+          (stepsResult.data ?? [])
+            .sort(
+              (a, b) =>
+                a.step_number -
+                b.step_number,
+            )
+            .map(
+              (step) =>
+                step.instruction,
+            )
+
+        setSteps(
+          loadedSteps.length > 0
+            ? loadedSteps
+            : [""],
+        )
+      } catch (err) {
+        console.error(
+          "Could not load recipe:",
+          err,
+        )
+
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Could not load recipe.",
+        )
+      } finally {
+        setLoadingRecipe(false)
+      }
+    }
+
+    void loadRecipe()
+  }, [recipeId, householdId])
 
   async function saveRecipe() {
     setError("")
@@ -353,12 +488,12 @@ export function RecipeForm({
     const validIngredients =
       ingredients.filter(
         (ingredient) =>
-          ingredient.ingredientName.trim()
+          ingredient.ingredientName.trim(),
       )
 
     if (validIngredients.length === 0) {
       setError(
-        "Please add at least one ingredient."
+        "Please add at least one ingredient.",
       )
       return
     }
@@ -370,53 +505,105 @@ export function RecipeForm({
     setSaving(true)
 
     try {
-      // ─────────────────────────────────────────
-      // Create recipe
-      // ─────────────────────────────────────────
+      let savedRecipeId = recipeId
 
-      const { data: recipe, error: recipeError } =
-        await supabase
+      // ───────────────────────────────────────
+      // Create or update recipe
+      // ───────────────────────────────────────
+
+      if (recipeId) {
+        const {
+          error: recipeError,
+        } = await supabase
           .from("recipes")
-          .insert({
-            household_id: householdId,
+          .update({
             name: name.trim(),
             type,
-            servings: Number(servings) || 2,
-            notes: notes.trim() || null,
+            servings:
+              Number(servings) || 2,
+            notes:
+              notes.trim() || null,
+            updated_at:
+              new Date().toISOString(),
+          })
+          .eq("id", recipeId)
+          .eq(
+            "household_id",
+            householdId,
+          )
+
+        if (recipeError) {
+          throw recipeError
+        }
+      } else {
+        const {
+          data: recipe,
+          error: recipeError,
+        } = await supabase
+          .from("recipes")
+          .insert({
+            household_id:
+              householdId,
+            name: name.trim(),
+            type,
+            servings:
+              Number(servings) || 2,
+            notes:
+              notes.trim() || null,
           })
           .select("id")
           .single()
 
-      if (recipeError || !recipe) {
-        console.error(
-          "Could not create recipe:",
-          recipeError
-        )
+        if (recipeError || !recipe) {
+          throw (
+            recipeError ??
+            new Error(
+              "Could not create recipe.",
+            )
+          )
+        }
 
-        setError(
-          recipeError?.message ??
-            "Could not create recipe."
-        )
-
-        return
+        savedRecipeId = recipe.id
       }
 
-      // ─────────────────────────────────────────
-      // Save ingredients
-      // ─────────────────────────────────────────
+      if (!savedRecipeId) {
+        throw new Error(
+          "Could not determine recipe ID.",
+        )
+      }
+
+      // ───────────────────────────────────────
+      // Replace ingredients
+      // ───────────────────────────────────────
+
+      const {
+        error: deleteIngredientsError,
+      } = await supabase
+        .from("recipe_ingredients")
+        .delete()
+        .eq(
+          "recipe_id",
+          savedRecipeId,
+        )
+
+      if (deleteIngredientsError) {
+        throw deleteIngredientsError
+      }
 
       const ingredientRows =
         validIngredients.map(
           (ingredient) => ({
-            recipe_id: recipe.id,
+            recipe_id:
+              savedRecipeId,
             ingredient_id:
-              ingredient.ingredientId ?? null,
+              ingredient.ingredientId ??
+              null,
             ingredient_name:
               ingredient.ingredientName.trim(),
             quantity:
               ingredient.quantity
                 ? Number(
-                    ingredient.quantity
+                    ingredient.quantity,
                   )
                 : null,
             unit:
@@ -424,76 +611,78 @@ export function RecipeForm({
               null,
             required:
               ingredient.required,
-          })
+          }),
         )
 
       const {
         error: ingredientsError,
       } = await supabase
         .from("recipe_ingredients")
-        .insert(ingredientRows)
+        .insert(
+          ingredientRows,
+        )
 
       if (ingredientsError) {
-        console.error(
-          "Could not save recipe ingredients:",
-          ingredientsError
-        )
-
-        await supabase
-          .from("recipes")
-          .delete()
-          .eq("id", recipe.id)
-
-        setError(
-          ingredientsError.message
-        )
-
-        return
+        throw ingredientsError
       }
 
-      // ─────────────────────────────────────────
-      // Save cooking steps
-      // ─────────────────────────────────────────
+      // ───────────────────────────────────────
+      // Replace cooking steps
+      // ───────────────────────────────────────
+
+      const {
+        error: deleteStepsError,
+      } = await supabase
+        .from("recipe_steps")
+        .delete()
+        .eq(
+          "recipe_id",
+          savedRecipeId,
+        )
+
+      if (deleteStepsError) {
+        throw deleteStepsError
+      }
 
       if (validSteps.length > 0) {
         const stepRows =
           validSteps.map(
-            (instruction, index) => ({
-              recipe_id: recipe.id,
-              step_number: index + 1,
+            (
               instruction,
-            })
+              index,
+            ) => ({
+              recipe_id:
+                savedRecipeId,
+              step_number:
+                index + 1,
+              instruction,
+            }),
           )
 
         const {
           error: stepsError,
         } = await supabase
           .from("recipe_steps")
-          .insert(stepRows)
-
-        if (stepsError) {
-          console.error(
-            "Could not save recipe steps:",
-            stepsError
+          .insert(
+            stepRows,
           )
 
-          await supabase
-            .from("recipes")
-            .delete()
-            .eq("id", recipe.id)
-
-          setError(stepsError.message)
-
-          return
+        if (stepsError) {
+          throw stepsError
         }
       }
 
       onSaved?.()
     } catch (err) {
-      console.error(err)
+      console.error(
+        "Could not save recipe:",
+        err,
+      )
 
       setError(
-        "Something went wrong while saving the recipe."
+        err instanceof Error
+          ? err.message
+          : "Something went wrong while saving the recipe.",
       )
     } finally {
       setSaving(false)
@@ -504,7 +693,11 @@ export function RecipeForm({
     <Card>
       <CardHeader>
         <div className="flex items-center justify-between gap-3">
-          <CardTitle>Add Recipe</CardTitle>
+          <CardTitle>
+            {recipeId
+              ? "Edit Recipe"
+              : "Add Recipe"}
+          </CardTitle>
 
           {onCancel && (
             <button
@@ -940,11 +1133,13 @@ export function RecipeForm({
             type="button"
             className="flex-1"
             onClick={saveRecipe}
-            disabled={saving}
+             disabled={saving || loadingRecipe}
           >
             {saving
               ? "Saving…"
-              : "Save Recipe"}
+              : recipeId
+                ? "Save Changes"
+                : "Save Recipe"}
           </Button>
         </div>
       </CardContent>

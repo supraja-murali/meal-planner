@@ -463,7 +463,7 @@ SAVED RECIPES
 - Use the supplied recipe IDs exactly.
 - Never invent UUIDs.
 - Never return an ID that was not supplied in the planner context.
-- For dry-rice/main dishes, select a saved recipe whose type is "other" when available.
+- For dry-rice/main dishes, select a saved recipe whose type is "dry_rice" when available.
 - Do not turn a gravy or poriyal into a dry-rice recipe merely by renaming it.
 
 PLANNING LOGIC
@@ -577,7 +577,7 @@ If gravy_poriyal:
 - mainRecipeId must be null.
 
 If dry_rice:
-- select exactly one saved dry-rice/one-pot rice recipe, normally type "other".
+- select exactly one saved dry-rice/one-pot rice recipe with type "dry_rice".
 - mainRecipeId must identify it.
 - gravyRecipeId must be null.
 - poriyalRecipeId must be null.
@@ -625,7 +625,7 @@ SAVED RECIPES
 
 - Use supplied saved recipe IDs.
 - Never invent UUIDs.
-- For dry-rice days, use a supplied saved "other" recipe suitable for the requested lunch.
+- For dry-rice days, use a supplied saved "dry_rice" recipe suitable for the requested lunch.
 - Do not fabricate a recipe that does not exist in the supplied recipe context.
 
 IMPORTANT

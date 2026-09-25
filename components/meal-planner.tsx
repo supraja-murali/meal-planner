@@ -44,7 +44,7 @@ export type PantryItem = {
 export type WeeklyRecipe = {
   id: string
   name: string
-  type: "gravy" | "poriyal" | "other"
+  type: "gravy" | "poriyal" | "dry_rice" | "other"
 }
 
 export type WeeklyMealDay = {

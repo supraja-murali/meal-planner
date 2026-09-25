@@ -98,6 +98,9 @@ export default function HomePage() {
   const [selectedRecipeId, setSelectedRecipeId] =
     useState<string | null>(null)
 
+  const [editingRecipeId, setEditingRecipeId] =
+    useState<string | null>(null)
+
   const [aiSettingsOpen, setAISettingsOpen] =
     useState(false)
 
@@ -1549,13 +1552,41 @@ export default function HomePage() {
 
   function resolveAnyRecipeId(
     value: unknown,
-    recipes: Array<{ id: string; name: string; type: string }>,
+    recipes: Array<{
+      id: string
+      name: string
+      type: string
+    }>,
+    expectedType?: "gravy" | "poriyal" | "dry_rice" | "other",
   ) {
-    if (typeof value !== "string") return null
-    const byId = recipes.find((recipe) => recipe.id === value)
-    if (byId) return byId.id
-    const normalized = value.trim().toLowerCase()
-    return recipes.find((recipe) => recipe.name.trim().toLowerCase() === normalized)?.id ?? null
+    if (typeof value !== "string") {
+      return null
+    }
+
+    const byId = recipes.find(
+      (recipe) =>
+        recipe.id === value &&
+        (!expectedType ||
+          recipe.type === expectedType),
+    )
+
+    if (byId) {
+      return byId.id
+    }
+
+    const normalized =
+      value.trim().toLowerCase()
+
+    return (
+      recipes.find(
+        (recipe) =>
+          (!expectedType ||
+            recipe.type === expectedType) &&
+          recipe.name
+            .trim()
+            .toLowerCase() === normalized,
+      )?.id ?? null
+    )
   }
 
   async function saveGeneratedWeek(
@@ -1628,15 +1659,28 @@ export default function HomePage() {
               ? "dry_rice"
               : "gravy_poriyal"
 
-      const mainRecipeId = resolveAnyRecipeId(
-        getDayRecipeValue(generated, "main"),
-        recipeCatalog,
-      )
+      const mainRecipeId =
+        lunchStyle === "dry_rice"
+          ? resolveAnyRecipeId(
+              getDayRecipeValue(
+                generated,
+                "main",
+              ),
+              recipeCatalog,
+              "dry_rice",
+            )
+          : resolveAnyRecipeId(
+              getDayRecipeValue(
+                generated,
+                "main",
+              ),
+              recipeCatalog,
+            )
       const gravyRecipeId = resolveRecipeId(getDayRecipeValue(generated, "gravy"), recipeCatalog, "gravy")
       const poriyalRecipeId = resolveRecipeId(getDayRecipeValue(generated, "poriyal"), recipeCatalog, "poriyal")
 
       if (lunchStyle === "dry_rice" && !mainRecipeId) {
-        throw new Error(`Gemini returned an invalid dry-rice recipe for ${date}. Add dry-rice recipes to your recipe catalogue first.`)
+        throw new Error(`No valid Dry Rice recipe was selected for ${date}. Add at least one recipe with type "Dry Rice" to your Recipe Catalogue.`)
       }
       if (lunchStyle !== "dry_rice" && !gravyRecipeId && !mainRecipeId) {
         throw new Error(`Gemini returned no valid lunch main for ${date}.`)
@@ -1795,11 +1839,27 @@ export default function HomePage() {
             : restriction.lunchStyle === "dry_rice"
               ? "dry_rice"
               : "gravy_poriyal"
-      const mainRecipeId = resolveAnyRecipeId(getDayRecipeValue(generated, "main"), recipeData ?? [])
+      const mainRecipeId =
+        lunchStyle === "dry_rice"
+          ? resolveAnyRecipeId(
+              getDayRecipeValue(
+                generated,
+                "main",
+              ),
+              recipeData ?? [],
+              "dry_rice",
+            )
+          : resolveAnyRecipeId(
+              getDayRecipeValue(
+                generated,
+                "main",
+              ),
+              recipeData ?? [],
+            )
       const gravyRecipeId = resolveRecipeId(getDayRecipeValue(generated, "gravy"), recipeData ?? [], "gravy")
       const poriyalRecipeId = resolveRecipeId(getDayRecipeValue(generated, "poriyal"), recipeData ?? [], "poriyal")
 
-      if (lunchStyle === "dry_rice" && !mainRecipeId) throw new Error(`Gemini returned an invalid dry-rice recipe for ${day.dayDate}.`)
+      if (lunchStyle === "dry_rice" && !mainRecipeId) throw new Error(`No valid Dry Rice recipe was selected for ${day.dayDate}. Add at least one recipe with type "Dry Rice" to your Recipe Catalogue.`)
       if (lunchStyle !== "dry_rice" && !gravyRecipeId && !mainRecipeId) throw new Error(`Gemini returned no valid lunch main for ${day.dayDate}.`)
 
       const { error } = await supabase
@@ -1901,12 +1961,17 @@ export default function HomePage() {
             householdId={
               HOUSEHOLD_ID
             }
-            onCancel={
-              goRecipes
+            recipeId={
+              editingRecipeId
             }
-            onSaved={
-              goRecipes
-            }
+            onCancel={() => {
+              setEditingRecipeId(null)
+              goRecipes()
+            }}
+            onSaved={() => {
+              setEditingRecipeId(null)
+              goRecipes()
+            }}
           />
         </div>
       </main>
@@ -2087,11 +2152,20 @@ export default function HomePage() {
                 householdId={
                   HOUSEHOLD_ID
                 }
-                onAddRecipe={() =>
+                onAddRecipe={() => {
+                  setEditingRecipeId(null)
                   setCurrentView(
                     "add-recipe",
                   )
-                }
+                }}
+                onEditRecipe={(recipeId) => {
+                  setEditingRecipeId(
+                    recipeId,
+                  )
+                  setCurrentView(
+                    "add-recipe",
+                  )
+                }}
                 onAddAIRecipe={() =>
                   setCurrentView(
                     "ai-recipe",

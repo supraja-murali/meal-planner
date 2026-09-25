@@ -7,23 +7,6 @@ export const metadata: Metadata = {
   description:
     'An intelligent Indian vegetarian meal planner for two — track protein and fibre targets, manage your pantry, and plan balanced gravy and poriyal meals.',
   generator: 'v0.app',
-  icons: {
-    icon: [
-      {
-        url: '/icon-light-32x32.png',
-        media: '(prefers-color-scheme: light)',
-      },
-      {
-        url: '/icon-dark-32x32.png',
-        media: '(prefers-color-scheme: dark)',
-      },
-      {
-        url: '/icon.svg',
-        type: 'image/svg+xml',
-      },
-    ],
-    apple: '/apple-icon.png',
-  },
 }
 
 export const viewport: Viewport = {

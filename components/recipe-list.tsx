@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react"
 import {
+  Edit3,
   Heart,
   Plus,
   Search,
@@ -36,15 +37,34 @@ type RecipeListProps = {
   householdId: string
   onAddRecipe: () => void
   onAddAIRecipe: () => void
+  onEditRecipe: (recipeId: string) => void
   onCookRecipe: (
     recipeId: string,
   ) => void
+}
+
+function getRecipeTypeLabel(
+  type: Recipe["type"],
+) {
+  switch (type) {
+    case "gravy":
+      return "Gravy"
+    case "poriyal":
+      return "Poriyal"
+    case "dry_rice":
+      return "Dry Rice"
+    case "other":
+      return "Other"
+    default:
+      return type
+  }
 }
 
 export function RecipeList({
   householdId,
   onAddRecipe,
   onAddAIRecipe,
+  onEditRecipe,
   onCookRecipe,
 }: RecipeListProps) {
   const [
@@ -392,11 +412,9 @@ export function RecipeList({
                       </CardTitle>
 
                       <p className="mt-1 text-xs capitalize text-muted-foreground">
-                        {recipe.type}{" "}
-                        · Serves{" "}
-                        {
-                          recipe.servings
-                        }
+                        {getRecipeTypeLabel(recipe.type)}
+                        {" · Serves "}
+                        {recipe.servings}
                       </p>
                     </div>
 
@@ -438,9 +456,7 @@ export function RecipeList({
                       type="button"
                       className="flex-1"
                       onClick={() =>
-                        onCookRecipe(
-                          recipe.id,
-                        )
+                        onCookRecipe(recipe.id)
                       }
                     >
                       Cook Again
@@ -449,11 +465,20 @@ export function RecipeList({
                     <button
                       type="button"
                       onClick={() =>
-                        deleteRecipe(
-                          recipe.id,
-                        )
+                        onEditRecipe(recipe.id)
                       }
-                      className="flex size-10 items-center justify-center rounded-md border border-border text-muted-foreground"
+                      className="flex size-10 items-center justify-center rounded-md border border-border text-muted-foreground hover:bg-muted"
+                      aria-label={`Edit ${recipe.name}`}
+                    >
+                      <Edit3 className="size-4" />
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        deleteRecipe(recipe.id)
+                      }
+                      className="flex size-10 items-center justify-center rounded-md border border-border text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
                       aria-label={`Delete ${recipe.name}`}
                     >
                       <Trash2 className="size-4" />
