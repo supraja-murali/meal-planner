@@ -1,7 +1,13 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import { Plus, Trash2, X } from "lucide-react"
+import {
+  Check,
+  Pencil,
+  Plus,
+  Trash2,
+  X,
+} from "lucide-react"
 
 import { supabase } from "@/lib/supabase"
 import { Button } from "@/components/ui/button"
@@ -34,6 +40,28 @@ type RecipeFormProps = {
   onCancel?: () => void
 }
 
+const UNIT_OPTIONS = [
+  { value: "pcs", label: "pcs" },
+  { value: "g", label: "g" },
+  { value: "kg", label: "kg" },
+  { value: "ml", label: "ml" },
+  { value: "L", label: "L" },
+  { value: "tbsp", label: "tbsp" },
+  { value: "tsp", label: "tsp" },
+  { value: "cup", label: "cup" },
+  { value: "pack", label: "pack" },
+]
+
+function createEmptyIngredient(): RecipeIngredient {
+  return {
+    localId: crypto.randomUUID(),
+    ingredientName: "",
+    quantity: "",
+    unit: "pcs",
+    required: true,
+  }
+}
+
 export function RecipeForm({
   userId,
   householdId,
@@ -41,168 +69,216 @@ export function RecipeForm({
   onCancel,
 }: RecipeFormProps) {
   const [name, setName] = useState("")
-  const [type, setType] = useState<"gravy" | "poriyal" | "other">("gravy")
+  const [type, setType] =
+    useState<"gravy" | "poriyal" | "other">("gravy")
   const [servings, setServings] = useState("2")
   const [notes, setNotes] = useState("")
 
-  const [ingredients, setIngredients] = useState<RecipeIngredient[]>([
-    {
-      localId: crypto.randomUUID(),
-      ingredientName: "",
-      quantity: "",
-      unit: "",
-      required: true,
-    },
-  ])
+  const [ingredients, setIngredients] = useState<
+    RecipeIngredient[]
+  >([])
 
   const [steps, setSteps] = useState<string[]>([""])
+
+  const [ingredientName, setIngredientName] = useState("")
+  const [ingredientId, setIngredientId] = useState<
+    string | undefined
+  >(undefined)
+  const [ingredientQuantity, setIngredientQuantity] =
+    useState("")
+  const [ingredientUnit, setIngredientUnit] =
+    useState("pcs")
+  const [ingredientRequired, setIngredientRequired] =
+    useState(true)
+
+  const [suggestions, setSuggestions] = useState<
+    IngredientSuggestion[]
+  >([])
+  const [showSuggestions, setShowSuggestions] =
+    useState(false)
+  const [searching, setSearching] = useState(false)
+
+  const ingredientInputRef =
+    useRef<HTMLInputElement>(null)
+
+  const suggestionContainerRef =
+    useRef<HTMLDivElement>(null)
 
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState("")
 
-  async function saveRecipe() {
-    setError("")
+  // userId is retained because the parent already supplies it.
+  // The current recipe tables are scoped by household_id.
+  void userId
 
-    if (!name.trim()) {
-      setError("Please enter a recipe name.")
+  // ─────────────────────────────────────────────
+  // Ingredient catalogue search
+  // ─────────────────────────────────────────────
+
+  useEffect(() => {
+    const searchText = ingredientName.trim()
+
+    if (!searchText) {
+      setSuggestions([])
+      setSearching(false)
       return
     }
 
-    const validIngredients = ingredients.filter(
-      (ingredient) => ingredient.ingredientName.trim()
+    let cancelled = false
+
+    const timer = setTimeout(async () => {
+      setSearching(true)
+
+      const { data, error } = await supabase
+        .from("ingredients")
+        .select("id, name")
+        .ilike("name", `%${searchText}%`)
+        .order("name", { ascending: true })
+        .limit(50)
+
+      if (cancelled) {
+        return
+      }
+
+      setSearching(false)
+
+      if (error) {
+        console.error(
+          "Could not search ingredients:",
+          error
+        )
+        setSuggestions([])
+        return
+      }
+
+      setSuggestions(data ?? [])
+    }, 180)
+
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
+  }, [ingredientName])
+
+  // ─────────────────────────────────────────────
+  // Close autocomplete when clicking outside
+  // ─────────────────────────────────────────────
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (
+        suggestionContainerRef.current &&
+        !suggestionContainerRef.current.contains(
+          event.target as Node
+        )
+      ) {
+        setShowSuggestions(false)
+      }
+    }
+
+    document.addEventListener(
+      "mousedown",
+      handleClickOutside
     )
 
-    if (validIngredients.length === 0) {
-      setError("Please add at least one ingredient.")
+    return () => {
+      document.removeEventListener(
+        "mousedown",
+        handleClickOutside
+      )
+    }
+  }, [])
+
+  // ─────────────────────────────────────────────
+  // Select autocomplete suggestion
+  // ─────────────────────────────────────────────
+
+  function selectSuggestion(
+    suggestion: IngredientSuggestion
+  ) {
+    setIngredientName(suggestion.name)
+    setIngredientId(suggestion.id)
+    setShowSuggestions(false)
+
+    // Focus quantity so adding the next ingredient is fast.
+    window.setTimeout(() => {
+      const quantityInput =
+        document.getElementById(
+          "recipe-ingredient-quantity"
+        )
+
+      quantityInput?.focus()
+    }, 0)
+  }
+
+  // ─────────────────────────────────────────────
+  // Add ingredient to draft
+  // ─────────────────────────────────────────────
+
+  function addIngredient() {
+    const trimmedName = ingredientName.trim()
+
+    if (!trimmedName) {
+      setError("Please enter an ingredient.")
+      ingredientInputRef.current?.focus()
       return
     }
 
-    const validSteps = steps
-      .map((step) => step.trim())
-      .filter(Boolean)
-
-    setSaving(true)
-
-    try {
-      // ─────────────────────────────────────────────
-      // Create recipe
-      // ─────────────────────────────────────────────
-
-      const { data: recipe, error: recipeError } = await supabase
-        .from("recipes")
-        .insert({
-          household_id: householdId,
-          name: name.trim(),
-          type,
-          servings: Number(servings) || 2,
-          notes: notes.trim() || null,
-        })
-        .select("id")
-        .single()
-
-      if (recipeError || !recipe) {
-        console.error("Could not create recipe:", recipeError)
-        setError(recipeError?.message ?? "Could not create recipe.")
-        return
-      }
-
-      // ─────────────────────────────────────────────
-      // Save ingredients
-      // ─────────────────────────────────────────────
-
-      const ingredientRows = validIngredients.map((ingredient) => ({
-        recipe_id: recipe.id,
-        ingredient_id: ingredient.ingredientId ?? null,
-        ingredient_name: ingredient.ingredientName.trim(),
-        quantity: ingredient.quantity
-          ? Number(ingredient.quantity)
-          : null,
-        unit: ingredient.unit.trim() || null,
-        required: ingredient.required,
-      }))
-
-      const { error: ingredientsError } = await supabase
-        .from("recipe_ingredients")
-        .insert(ingredientRows)
-
-      if (ingredientsError) {
-        console.error(
-          "Could not save recipe ingredients:",
-          ingredientsError
-        )
-
-        // Remove the recipe if ingredient saving failed
-        await supabase
-          .from("recipes")
-          .delete()
-          .eq("id", recipe.id)
-
-        setError(ingredientsError.message)
-        return
-      }
-
-      // ─────────────────────────────────────────────
-      // Save steps
-      // ─────────────────────────────────────────────
-
-      if (validSteps.length > 0) {
-        const stepRows = validSteps.map((instruction, index) => ({
-          recipe_id: recipe.id,
-          step_number: index + 1,
-          instruction,
-        }))
-
-        const { error: stepsError } = await supabase
-          .from("recipe_steps")
-          .insert(stepRows)
-
-        if (stepsError) {
-          console.error("Could not save recipe steps:", stepsError)
-
-          // Remove the recipe if step saving failed
-          await supabase
-            .from("recipes")
-            .delete()
-            .eq("id", recipe.id)
-
-          setError(stepsError.message)
-          return
-        }
-      }
-
-      onSaved?.()
-    } catch (err) {
-      console.error(err)
-      setError("Something went wrong while saving the recipe.")
-    } finally {
-      setSaving(false)
+    if (
+      ingredientQuantity.trim() &&
+      (!Number.isFinite(Number(ingredientQuantity)) ||
+        Number(ingredientQuantity) < 0)
+    ) {
+      setError("Please enter a valid ingredient quantity.")
+      return
     }
-  }
 
-  function addIngredientRow() {
+    const newIngredient: RecipeIngredient = {
+      localId: crypto.randomUUID(),
+      ingredientName: trimmedName,
+      quantity: ingredientQuantity.trim(),
+      unit: ingredientUnit,
+      required: ingredientRequired,
+      ingredientId,
+    }
+
     setIngredients((previous) => [
       ...previous,
-      {
-        localId: crypto.randomUUID(),
-        ingredientName: "",
-        quantity: "",
-        unit: "",
-        required: true,
-      },
+      newIngredient,
     ])
+
+    // Reset only the entry form.
+    setIngredientName("")
+    setIngredientId(undefined)
+    setIngredientQuantity("")
+    setIngredientUnit("pcs")
+    setIngredientRequired(true)
+    setSuggestions([])
+    setShowSuggestions(false)
+    setError("")
+
+    // Keep focus on ingredient input.
+    window.setTimeout(() => {
+      ingredientInputRef.current?.focus()
+    }, 0)
   }
 
-  function removeIngredientRow(localId: string) {
-    setIngredients((previous) => {
-      if (previous.length === 1) {
-        return previous
-      }
+  // ─────────────────────────────────────────────
+  // Delete ingredient
+  // ─────────────────────────────────────────────
 
-      return previous.filter(
-        (ingredient) => ingredient.localId !== localId
+  function deleteIngredient(localId: string) {
+    setIngredients((previous) =>
+      previous.filter(
+        (ingredient) =>
+          ingredient.localId !== localId
       )
-    })
+    )
   }
+
+  // ─────────────────────────────────────────────
+  // Edit ingredient
+  // ─────────────────────────────────────────────
 
   function updateIngredient(
     localId: string,
@@ -220,8 +296,15 @@ export function RecipeForm({
     )
   }
 
+  // ─────────────────────────────────────────────
+  // Steps
+  // ─────────────────────────────────────────────
+
   function addStep() {
-    setSteps((previous) => [...previous, ""])
+    setSteps((previous) => [
+      ...previous,
+      "",
+    ])
   }
 
   function removeStep(index: number) {
@@ -230,16 +313,191 @@ export function RecipeForm({
         return previous
       }
 
-      return previous.filter((_, stepIndex) => stepIndex !== index)
+      return previous.filter(
+        (_, stepIndex) =>
+          stepIndex !== index
+      )
     })
   }
 
-  function updateStep(index: number, value: string) {
+  function updateStep(
+    index: number,
+    value: string
+  ) {
     setSteps((previous) =>
       previous.map((step, stepIndex) =>
-        stepIndex === index ? value : step
+        stepIndex === index
+          ? value
+          : step
       )
     )
+  }
+
+  // ─────────────────────────────────────────────
+  // Save recipe
+  // ─────────────────────────────────────────────
+
+  async function saveRecipe() {
+    setError("")
+
+    if (!name.trim()) {
+      setError("Please enter a recipe name.")
+      return
+    }
+
+    if (ingredients.length === 0) {
+      setError("Please add at least one ingredient.")
+      return
+    }
+
+    const validIngredients =
+      ingredients.filter(
+        (ingredient) =>
+          ingredient.ingredientName.trim()
+      )
+
+    if (validIngredients.length === 0) {
+      setError(
+        "Please add at least one ingredient."
+      )
+      return
+    }
+
+    const validSteps = steps
+      .map((step) => step.trim())
+      .filter(Boolean)
+
+    setSaving(true)
+
+    try {
+      // ─────────────────────────────────────────
+      // Create recipe
+      // ─────────────────────────────────────────
+
+      const { data: recipe, error: recipeError } =
+        await supabase
+          .from("recipes")
+          .insert({
+            household_id: householdId,
+            name: name.trim(),
+            type,
+            servings: Number(servings) || 2,
+            notes: notes.trim() || null,
+          })
+          .select("id")
+          .single()
+
+      if (recipeError || !recipe) {
+        console.error(
+          "Could not create recipe:",
+          recipeError
+        )
+
+        setError(
+          recipeError?.message ??
+            "Could not create recipe."
+        )
+
+        return
+      }
+
+      // ─────────────────────────────────────────
+      // Save ingredients
+      // ─────────────────────────────────────────
+
+      const ingredientRows =
+        validIngredients.map(
+          (ingredient) => ({
+            recipe_id: recipe.id,
+            ingredient_id:
+              ingredient.ingredientId ?? null,
+            ingredient_name:
+              ingredient.ingredientName.trim(),
+            quantity:
+              ingredient.quantity
+                ? Number(
+                    ingredient.quantity
+                  )
+                : null,
+            unit:
+              ingredient.unit.trim() ||
+              null,
+            required:
+              ingredient.required,
+          })
+        )
+
+      const {
+        error: ingredientsError,
+      } = await supabase
+        .from("recipe_ingredients")
+        .insert(ingredientRows)
+
+      if (ingredientsError) {
+        console.error(
+          "Could not save recipe ingredients:",
+          ingredientsError
+        )
+
+        await supabase
+          .from("recipes")
+          .delete()
+          .eq("id", recipe.id)
+
+        setError(
+          ingredientsError.message
+        )
+
+        return
+      }
+
+      // ─────────────────────────────────────────
+      // Save cooking steps
+      // ─────────────────────────────────────────
+
+      if (validSteps.length > 0) {
+        const stepRows =
+          validSteps.map(
+            (instruction, index) => ({
+              recipe_id: recipe.id,
+              step_number: index + 1,
+              instruction,
+            })
+          )
+
+        const {
+          error: stepsError,
+        } = await supabase
+          .from("recipe_steps")
+          .insert(stepRows)
+
+        if (stepsError) {
+          console.error(
+            "Could not save recipe steps:",
+            stepsError
+          )
+
+          await supabase
+            .from("recipes")
+            .delete()
+            .eq("id", recipe.id)
+
+          setError(stepsError.message)
+
+          return
+        }
+      }
+
+      onSaved?.()
+    } catch (err) {
+      console.error(err)
+
+      setError(
+        "Something went wrong while saving the recipe."
+      )
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
@@ -253,6 +511,7 @@ export function RecipeForm({
               type="button"
               onClick={onCancel}
               className="rounded-md p-1 text-muted-foreground hover:bg-muted"
+              aria-label="Close"
             >
               <X className="h-5 w-5" />
             </button>
@@ -261,9 +520,9 @@ export function RecipeForm({
       </CardHeader>
 
       <CardContent className="space-y-6">
-        {/* ───────────────────────────────────────── */}
+        {/* ═══════════════════════════════════════ */}
         {/* Recipe details */}
-        {/* ───────────────────────────────────────── */}
+        {/* ═══════════════════════════════════════ */}
 
         <div className="space-y-4">
           <div className="space-y-2">
@@ -273,7 +532,9 @@ export function RecipeForm({
 
             <Input
               value={name}
-              onChange={(event) => setName(event.target.value)}
+              onChange={(event) =>
+                setName(event.target.value)
+              }
               placeholder="e.g. Tomato sambar"
             />
           </div>
@@ -296,9 +557,17 @@ export function RecipeForm({
                 }
                 className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
               >
-                <option value="gravy">Gravy</option>
-                <option value="poriyal">Poriyal</option>
-                <option value="other">Other</option>
+                <option value="gravy">
+                  Gravy
+                </option>
+
+                <option value="poriyal">
+                  Poriyal
+                </option>
+
+                <option value="other">
+                  Other
+                </option>
               </select>
             </div>
 
@@ -312,58 +581,245 @@ export function RecipeForm({
                 min="1"
                 value={servings}
                 onChange={(event) =>
-                  setServings(event.target.value)
+                  setServings(
+                    event.target.value
+                  )
                 }
               />
             </div>
           </div>
         </div>
 
-        {/* ───────────────────────────────────────── */}
+        {/* ═══════════════════════════════════════ */}
         {/* Ingredients */}
-        {/* ───────────────────────────────────────── */}
+        {/* ═══════════════════════════════════════ */}
 
         <div className="space-y-3">
-          <div className="flex items-center justify-between">
+          <div>
             <h3 className="text-sm font-semibold">
               Ingredients
             </h3>
 
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={addIngredientRow}
-            >
-              <Plus className="mr-1 h-4 w-4" />
-              Add
-            </Button>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Add each ingredient below. Added
+              ingredients will appear underneath.
+            </p>
           </div>
 
-          <div className="space-y-4">
-            {ingredients.map((ingredient) => (
-              <IngredientRow
-                key={ingredient.localId}
-                ingredient={ingredient}
-                onChange={(changes) =>
-                  updateIngredient(
-                    ingredient.localId,
-                    changes
+          {/* ───────────────────────────────────── */}
+          {/* Add ingredient container */}
+          {/* ───────────────────────────────────── */}
+
+          <div className="rounded-xl border border-border bg-muted/20 p-3">
+            <div
+              ref={suggestionContainerRef}
+              className="relative"
+            >
+              <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
+                Ingredient
+              </label>
+
+              <Input
+                ref={ingredientInputRef}
+                value={ingredientName}
+                onChange={(event) => {
+                  setIngredientName(
+                    event.target.value
                   )
-                }
-                onRemove={() =>
-                  removeIngredientRow(
-                    ingredient.localId
-                  )
-                }
+                  setIngredientId(undefined)
+                  setShowSuggestions(true)
+                  setError("")
+                }}
+                onFocus={() => {
+                  if (
+                    suggestions.length > 0
+                  ) {
+                    setShowSuggestions(true)
+                  }
+                }}
+                placeholder="Search or type an ingredient..."
+                autoComplete="off"
+                onKeyDown={(event) => {
+                  if (
+                    event.key === "Enter" &&
+                    !showSuggestions
+                  ) {
+                    event.preventDefault()
+                    addIngredient()
+                  }
+                }}
               />
-            ))}
+
+              {/* Autocomplete */}
+              {showSuggestions &&
+                ingredientName.trim() && (
+                  <div className="absolute left-0 right-0 top-full z-50 mt-1 overflow-hidden rounded-xl border border-border bg-background shadow-xl">
+                    {searching ? (
+                      <div className="px-3 py-3 text-sm text-muted-foreground">
+                        Searching ingredients…
+                      </div>
+                    ) : suggestions.length >
+                      0 ? (
+                      <div className="max-h-56 overflow-y-auto overscroll-contain">
+                        {suggestions.map(
+                          (suggestion) => (
+                            <button
+                              key={
+                                suggestion.id
+                              }
+                              type="button"
+                              onMouseDown={(
+                                event
+                              ) =>
+                                event.preventDefault()
+                              }
+                              onClick={() =>
+                                selectSuggestion(
+                                  suggestion
+                                )
+                              }
+                              className="block w-full px-3 py-2.5 text-left text-sm hover:bg-muted"
+                            >
+                              {suggestion.name}
+                            </button>
+                          )
+                        )}
+                      </div>
+                    ) : (
+                      <div className="px-3 py-3 text-sm text-muted-foreground">
+                        No matching ingredient.
+                        You can still add it
+                        manually.
+                      </div>
+                    )}
+                  </div>
+                )}
+            </div>
+
+            {/* Quantity / unit */}
+            <div className="mt-3 grid grid-cols-[1fr_1fr_auto] gap-2">
+              <div>
+                <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
+                  Quantity
+                </label>
+
+                <Input
+                  id="recipe-ingredient-quantity"
+                  type="number"
+                  min="0"
+                  step="any"
+                  value={ingredientQuantity}
+                  onChange={(event) =>
+                    setIngredientQuantity(
+                      event.target.value
+                    )
+                  }
+                  placeholder="3"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
+                  Unit
+                </label>
+
+                <select
+                  value={ingredientUnit}
+                  onChange={(event) =>
+                    setIngredientUnit(
+                      event.target.value
+                    )
+                  }
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                >
+                  {UNIT_OPTIONS.map(
+                    (unit) => (
+                      <option
+                        key={unit.value}
+                        value={unit.value}
+                      >
+                        {unit.label}
+                      </option>
+                    )
+                  )}
+                </select>
+              </div>
+
+              <div className="flex items-end">
+                <Button
+                  type="button"
+                  size="icon"
+                  onClick={addIngredient}
+                  disabled={
+                    !ingredientName.trim()
+                  }
+                  aria-label="Add ingredient"
+                >
+                  <Plus className="h-5 w-5" />
+                </Button>
+              </div>
+            </div>
+
+            {/* Required / Optional */}
+            <label className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
+              <input
+                type="checkbox"
+                checked={ingredientRequired}
+                onChange={(event) =>
+                  setIngredientRequired(
+                    event.target.checked
+                  )
+                }
+                className="h-4 w-4"
+              />
+
+              Required ingredient
+            </label>
           </div>
+
+          {/* ───────────────────────────────────── */}
+          {/* Added ingredients */}
+          {/* ───────────────────────────────────── */}
+
+          {ingredients.length > 0 && (
+            <div className="overflow-hidden rounded-xl border border-border">
+              {ingredients.map(
+                (ingredient, index) => (
+                  <RecipeIngredientRow
+                    key={
+                      ingredient.localId
+                    }
+                    ingredient={ingredient}
+                    index={index}
+                    onChange={(
+                      changes
+                    ) =>
+                      updateIngredient(
+                        ingredient.localId,
+                        changes
+                      )
+                    }
+                    onDelete={() =>
+                      deleteIngredient(
+                        ingredient.localId
+                      )
+                    }
+                  />
+                )
+              )}
+            </div>
+          )}
+
+          {ingredients.length === 0 && (
+            <div className="rounded-xl border border-dashed border-border px-4 py-5 text-center text-sm text-muted-foreground">
+              No ingredients added yet.
+            </div>
+          )}
         </div>
 
-        {/* ───────────────────────────────────────── */}
-        {/* Steps */}
-        {/* ───────────────────────────────────────── */}
+        {/* ═══════════════════════════════════════ */}
+        {/* Cooking steps */}
+        {/* ═══════════════════════════════════════ */}
 
         <div className="space-y-3">
           <div className="flex items-center justify-between">
@@ -395,9 +851,14 @@ export function RecipeForm({
                 <textarea
                   value={step}
                   onChange={(event) =>
-                    updateStep(index, event.target.value)
+                    updateStep(
+                      index,
+                      event.target.value
+                    )
                   }
-                  placeholder={`Step ${index + 1}`}
+                  placeholder={`Step ${
+                    index + 1
+                  }`}
                   rows={2}
                   className="min-h-[72px] flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
                 />
@@ -405,8 +866,13 @@ export function RecipeForm({
                 {steps.length > 1 && (
                   <button
                     type="button"
-                    onClick={() => removeStep(index)}
+                    onClick={() =>
+                      removeStep(index)
+                    }
                     className="mt-2 text-muted-foreground hover:text-destructive"
+                    aria-label={`Delete step ${
+                      index + 1
+                    }`}
                   >
                     <Trash2 className="h-4 w-4" />
                   </button>
@@ -416,9 +882,9 @@ export function RecipeForm({
           </div>
         </div>
 
-        {/* ───────────────────────────────────────── */}
+        {/* ═══════════════════════════════════════ */}
         {/* Notes */}
-        {/* ───────────────────────────────────────── */}
+        {/* ═══════════════════════════════════════ */}
 
         <div className="space-y-2">
           <label className="text-sm font-medium">
@@ -427,16 +893,20 @@ export function RecipeForm({
 
           <textarea
             value={notes}
-            onChange={(event) => setNotes(event.target.value)}
+            onChange={(event) =>
+              setNotes(
+                event.target.value
+              )
+            }
             placeholder="Optional notes about this recipe"
             rows={3}
             className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
           />
         </div>
 
-        {/* ───────────────────────────────────────── */}
+        {/* ═══════════════════════════════════════ */}
         {/* Error */}
-        {/* ───────────────────────────────────────── */}
+        {/* ═══════════════════════════════════════ */}
 
         {error && (
           <p className="text-sm text-destructive">
@@ -444,9 +914,9 @@ export function RecipeForm({
           </p>
         )}
 
-        {/* ───────────────────────────────────────── */}
+        {/* ═══════════════════════════════════════ */}
         {/* Actions */}
-        {/* ───────────────────────────────────────── */}
+        {/* ═══════════════════════════════════════ */}
 
         <div className="flex gap-2">
           {onCancel && (
@@ -467,7 +937,9 @@ export function RecipeForm({
             onClick={saveRecipe}
             disabled={saving}
           >
-            {saving ? "Saving…" : "Save Recipe"}
+            {saving
+              ? "Saving…"
+              : "Save Recipe"}
           </Button>
         </div>
       </CardContent>
@@ -475,93 +947,123 @@ export function RecipeForm({
   )
 }
 
-/* ================================================= */
-/* Ingredient row with autocomplete                  */
-/* ================================================= */
+/* ═══════════════════════════════════════════════ */
+/* Added ingredient row                           */
+/* ═══════════════════════════════════════════════ */
 
-type IngredientRowProps = {
+type RecipeIngredientRowProps = {
   ingredient: RecipeIngredient
-  onChange: (changes: Partial<RecipeIngredient>) => void
-  onRemove: () => void
+  index: number
+  onChange: (
+    changes: Partial<RecipeIngredient>
+  ) => void
+  onDelete: () => void
 }
 
-function IngredientRow({
+function RecipeIngredientRow({
   ingredient,
+  index,
   onChange,
-  onRemove,
-}: IngredientRowProps) {
-  const [suggestions, setSuggestions] = useState<
-    IngredientSuggestion[]
-  >([])
-
-  const [showSuggestions, setShowSuggestions] =
+  onDelete,
+}: RecipeIngredientRowProps) {
+  const [editing, setEditing] =
     useState(false)
 
-  const [searching, setSearching] = useState(false)
+  const [editName, setEditName] =
+    useState(ingredient.ingredientName)
 
-  const containerRef = useRef<HTMLDivElement>(null)
+  const [editQuantity, setEditQuantity] =
+    useState(ingredient.quantity)
 
-  // ─────────────────────────────────────────────
-  // Search ingredient catalogue
-  // ─────────────────────────────────────────────
+  const [editUnit, setEditUnit] =
+    useState(
+      ingredient.unit || "pcs"
+    )
+
+  const [editRequired, setEditRequired] =
+    useState(ingredient.required)
+
+  const [editSuggestions, setEditSuggestions] =
+    useState<IngredientSuggestion[]>([])
+
+  const [showEditSuggestions, setShowEditSuggestions] =
+    useState(false)
+
+  const [searchingEdit, setSearchingEdit] =
+    useState(false)
+
+  const editContainerRef =
+    useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    const searchText = ingredient.ingredientName.trim()
+    if (!editing) {
+      return
+    }
+
+    const searchText =
+      editName.trim()
 
     if (!searchText) {
-      setSuggestions([])
-      setShowSuggestions(false)
+      setEditSuggestions([])
+      setSearchingEdit(false)
       return
     }
 
     let cancelled = false
 
     const timer = setTimeout(async () => {
-      setSearching(true)
+      setSearchingEdit(true)
 
-      const { data, error } = await supabase
-        .from("ingredients")
-        .select("id, name")
-        .ilike("name", `${searchText}%`)
-        .order("name", { ascending: true })
-        .limit(8)
+      const { data, error } =
+        await supabase
+          .from("ingredients")
+          .select("id, name")
+          .ilike(
+            "name",
+            `%${searchText}%`
+          )
+          .order("name", {
+            ascending: true,
+          })
+          .limit(50)
 
-      if (cancelled) return
+      if (cancelled) {
+        return
+      }
 
-      setSearching(false)
+      setSearchingEdit(false)
 
       if (error) {
         console.error(
           "Could not search ingredients:",
           error
         )
-        setSuggestions([])
+        setEditSuggestions([])
         return
       }
 
-      setSuggestions(data ?? [])
-      setShowSuggestions((data ?? []).length > 0)
-    }, 200)
+      setEditSuggestions(
+        data ?? []
+      )
+    }, 180)
 
     return () => {
       cancelled = true
       clearTimeout(timer)
     }
-  }, [ingredient.ingredientName])
-
-  // ─────────────────────────────────────────────
-  // Close dropdown when clicking outside
-  // ─────────────────────────────────────────────
+  }, [editName, editing])
 
   useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
+    function handleClickOutside(
+      event: MouseEvent
+    ) {
       if (
-        containerRef.current &&
-        !containerRef.current.contains(
+        editContainerRef.current &&
+        !editContainerRef.current.contains(
           event.target as Node
         )
       ) {
-        setShowSuggestions(false)
+        setShowEditSuggestions(false)
       }
     }
 
@@ -578,145 +1080,265 @@ function IngredientRow({
     }
   }, [])
 
-  function selectSuggestion(
+  function startEditing() {
+    setEditName(
+      ingredient.ingredientName
+    )
+    setEditQuantity(
+      ingredient.quantity
+    )
+    setEditUnit(
+      ingredient.unit || "pcs"
+    )
+    setEditRequired(
+      ingredient.required
+    )
+    setEditing(true)
+  }
+
+  function cancelEditing() {
+    setEditing(false)
+    setShowEditSuggestions(false)
+  }
+
+  function saveEditing() {
+    if (!editName.trim()) {
+      return
+    }
+
+    if (
+      editQuantity.trim() &&
+      (!Number.isFinite(
+        Number(editQuantity)
+      ) ||
+        Number(editQuantity) < 0)
+    ) {
+      return
+    }
+
+    onChange({
+      ingredientName:
+        editName.trim(),
+      quantity:
+        editQuantity.trim(),
+      unit: editUnit,
+      required: editRequired,
+    })
+
+    setEditing(false)
+    setShowEditSuggestions(false)
+  }
+
+  function selectEditSuggestion(
     suggestion: IngredientSuggestion
   ) {
+    setEditName(suggestion.name)
+
     onChange({
-      ingredientName: suggestion.name,
       ingredientId: suggestion.id,
     })
 
-    setSuggestions([])
-    setShowSuggestions(false)
+    setShowEditSuggestions(false)
   }
 
-  return (
-    <div className="rounded-lg border border-border p-3">
-      <div className="grid grid-cols-[1fr_auto] gap-2">
-        {/* Ingredient name */}
+  if (editing) {
+    return (
+      <div className="border-b border-border p-3 last:border-b-0">
         <div
-          ref={containerRef}
+          ref={editContainerRef}
           className="relative"
         >
-          <label className="mb-1 block text-xs text-muted-foreground">
-            Ingredient
-          </label>
-
           <Input
-            value={ingredient.ingredientName}
+            value={editName}
             onChange={(event) => {
+              setEditName(
+                event.target.value
+              )
+
               onChange({
-                ingredientName: event.target.value,
-                ingredientId: undefined,
+                ingredientId:
+                  undefined,
               })
 
-              setShowSuggestions(true)
+              setShowEditSuggestions(
+                true
+              )
             }}
             onFocus={() => {
-              if (suggestions.length > 0) {
-                setShowSuggestions(true)
+              if (
+                editSuggestions.length >
+                0
+              ) {
+                setShowEditSuggestions(
+                  true
+                )
               }
             }}
-            placeholder="Type ingredient..."
             autoComplete="off"
           />
 
-          {/* Dropdown */}
-          {showSuggestions &&
-            ingredient.ingredientName.trim() &&
-            (suggestions.length > 0 || searching) && (
-              <div className="absolute left-0 right-0 top-full z-50 mt-1 overflow-hidden rounded-md border border-border bg-background shadow-lg">
-                {searching ? (
+          {showEditSuggestions &&
+            editName.trim() && (
+              <div className="absolute left-0 right-0 top-full z-50 mt-1 overflow-hidden rounded-xl border border-border bg-background shadow-xl">
+                {searchingEdit ? (
                   <div className="px-3 py-2 text-sm text-muted-foreground">
                     Searching…
                   </div>
                 ) : (
-                  <div className="max-h-52 overflow-y-auto py-1">
-                    {suggestions.map((suggestion) => (
-                      <button
-                        key={suggestion.id}
-                        type="button"
-                        onMouseDown={(event) => {
-                          event.preventDefault()
-                          selectSuggestion(suggestion)
-                        }}
-                        className="block w-full px-3 py-2 text-left text-sm hover:bg-muted"
-                      >
-                        {suggestion.name}
-                      </button>
-                    ))}
+                  <div className="max-h-48 overflow-y-auto">
+                    {editSuggestions.map(
+                      (suggestion) => (
+                        <button
+                          key={
+                            suggestion.id
+                          }
+                          type="button"
+                          onMouseDown={(
+                            event
+                          ) =>
+                            event.preventDefault()
+                          }
+                          onClick={() =>
+                            selectEditSuggestion(
+                              suggestion
+                            )
+                          }
+                          className="block w-full px-3 py-2 text-left text-sm hover:bg-muted"
+                        >
+                          {
+                            suggestion.name
+                          }
+                        </button>
+                      )
+                    )}
                   </div>
                 )}
               </div>
             )}
         </div>
 
-        {/* Remove */}
-        <div className="pt-6">
-          <button
-            type="button"
-            onClick={onRemove}
-            className="rounded-md p-2 text-muted-foreground hover:bg-muted hover:text-destructive"
-            aria-label="Remove ingredient"
-          >
-            <Trash2 className="h-4 w-4" />
-          </button>
-        </div>
-      </div>
-
-      {/* Quantity / Unit / Required */}
-      <div className="mt-3 grid grid-cols-[1fr_1fr_auto] gap-2">
-        <div>
-          <label className="mb-1 block text-xs text-muted-foreground">
-            Quantity
-          </label>
-
+        <div className="mt-2 grid grid-cols-[1fr_1fr_auto] gap-2">
           <Input
             type="number"
             min="0"
             step="any"
-            value={ingredient.quantity}
+            value={editQuantity}
             onChange={(event) =>
-              onChange({
-                quantity: event.target.value,
-              })
+              setEditQuantity(
+                event.target.value
+              )
             }
-            placeholder="2"
+            placeholder="Quantity"
           />
+
+          <select
+            value={editUnit}
+            onChange={(event) =>
+              setEditUnit(
+                event.target.value
+              )
+            }
+            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+          >
+            {UNIT_OPTIONS.map(
+              (unit) => (
+                <option
+                  key={unit.value}
+                  value={unit.value}
+                >
+                  {unit.label}
+                </option>
+              )
+            )}
+          </select>
+
+          <div className="flex gap-1">
+            <Button
+              type="button"
+              size="icon"
+              onClick={saveEditing}
+              aria-label="Save ingredient"
+            >
+              <Check className="h-4 w-4" />
+            </Button>
+
+            <Button
+              type="button"
+              size="icon"
+              variant="outline"
+              onClick={cancelEditing}
+              aria-label="Cancel editing"
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
         </div>
 
-        <div>
-          <label className="mb-1 block text-xs text-muted-foreground">
-            Unit
-          </label>
-
-          <Input
-            value={ingredient.unit}
+        <label className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+          <input
+            type="checkbox"
+            checked={editRequired}
             onChange={(event) =>
-              onChange({
-                unit: event.target.value,
-              })
+              setEditRequired(
+                event.target.checked
+              )
             }
-            placeholder="pcs / g / tbsp"
+            className="h-4 w-4"
           />
+
+          Required ingredient
+        </label>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex min-h-12 items-center gap-2 border-b border-border px-3 py-2 last:border-b-0">
+      {/* Ingredient number */}
+      <span className="w-5 shrink-0 text-xs text-muted-foreground">
+        {index + 1}
+      </span>
+
+      {/* Ingredient details */}
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-sm font-medium">
+          {ingredient.ingredientName}
         </div>
 
-        <div className="flex items-end pb-2">
-          <label className="flex items-center gap-2 text-xs">
-            <input
-              type="checkbox"
-              checked={ingredient.required}
-              onChange={(event) =>
-                onChange({
-                  required: event.target.checked,
-                })
-              }
-              className="h-4 w-4"
-            />
-            Required
-          </label>
+        <div className="text-xs text-muted-foreground">
+          {ingredient.quantity
+            ? `${ingredient.quantity} ${
+                ingredient.unit || ""
+              }`
+            : "Amount not specified"}
+
+          {" · "}
+
+          {ingredient.required
+            ? "Required"
+            : "Optional"}
         </div>
       </div>
+
+      {/* Edit */}
+      <button
+        type="button"
+        onClick={startEditing}
+        className="flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+        aria-label={`Edit ${ingredient.ingredientName}`}
+      >
+        <Pencil className="h-4 w-4" />
+      </button>
+
+      {/* Delete */}
+      <button
+        type="button"
+        onClick={onDelete}
+        className="flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+        aria-label={`Delete ${ingredient.ingredientName}`}
+      >
+        <Trash2 className="h-4 w-4" />
+      </button>
     </div>
   )
 }

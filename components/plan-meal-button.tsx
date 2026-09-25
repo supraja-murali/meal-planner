@@ -1,32 +1,49 @@
 "use client"
 
-import { useState } from "react"
+import {
+  CalendarDays,
+  KeyRound,
+  Settings,
+  Sparkles,
+} from "lucide-react"
+
 import { Button } from "@/components/ui/button"
-import { Sparkles } from "lucide-react"
 
-export function PlanMealButton() {
-  const [showMessage, setShowMessage] = useState(false)
+type Props = {
+  onPlan: () => void
+  onSettings: () => void
+}
 
+export function PlanMealButton({
+  onPlan,
+  onSettings,
+}: Props) {
   return (
-    <div className="flex flex-col gap-2">
+    <div className="space-y-2">
       <Button
         type="button"
         size="lg"
         className="h-14 w-full rounded-2xl text-base font-semibold shadow-sm"
-        onClick={() => setShowMessage(true)}
+        onClick={onPlan}
       >
-        <span aria-hidden="true">🍛</span>
-        Plan Today&apos;s Meal
+        <CalendarDays className="mr-2 h-5 w-5" />
+        Plan My Week
+        <Sparkles className="ml-2 h-4 w-4" />
       </Button>
-      {showMessage && (
-        <p
-          role="status"
-          className="flex items-center justify-center gap-1.5 rounded-xl bg-accent px-3 py-2 text-center text-sm font-medium text-accent-foreground"
-        >
-          <Sparkles className="size-4" aria-hidden="true" />
-          Meal planning is coming soon — hang tight!
-        </p>
-      )}
+
+      <Button
+        type="button"
+        variant="outline"
+        className="w-full"
+        onClick={onSettings}
+      >
+        <Settings className="mr-2 h-4 w-4" />
+        Gemini AI Settings
+      </Button>
+
+      <p className="text-center text-xs text-muted-foreground">
+        Bring your own Gemini API key
+      </p>
     </div>
   )
 }
